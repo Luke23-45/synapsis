@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nth-attention"
+version = "0.1.0"
+description = "Neuro-Topological Hysteresis Attention Architecture for Robotic Memory"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "NTH Research Team"}
+]
+
+dependencies = [
+    "torch>=2.1.0",
+    "einops>=0.7.0",
+    "scipy>=1.11.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+full = [
+    "transformers>=4.36.0",
+    "opencv-python>=4.8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

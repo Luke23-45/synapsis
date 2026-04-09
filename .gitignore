@@ -1,0 +1,69 @@
+### --- SECRETS & ENVIRONMENT ---
+.env
+.env.local
+.env.*.local
+*.env
+*.pem
+*.key
+credentials.json
+secrets.txt
+__pycache__
+### --- OPERATING SYSTEMS ---
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.trash/
+
+### --- IDEs & EDITORS ---
+# Visual Studio Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# JetBrains (PyCharm, IntelliJ, etc.)
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+!*.svg  # commonly mistaken for swap files
+
+### --- LOGS & TEMPORARY ---
+*.log
+logs/
+*.tmp
+*.temp
+*.bak
+*.swp
+applied
+docs
+outputs
+experiments/outputs
+TASKS.md
