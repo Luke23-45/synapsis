@@ -1,1 +1,1 @@
-"""Robotics experiments: real-trajectory applied validation (no training)."""
+"""Primary empirical layer: real-trajectory validation without model training."""

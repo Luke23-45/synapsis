@@ -1,4 +1,4 @@
-# SYNAPSE Robotics Applied Validation Configuration
+# SYNAPSE Primary Empirical Layer: Robotics
 # =====================================================
 # Self-contained config for real-trajectory validation
 # experiments (AP-00 through AP-04).
@@ -39,6 +39,9 @@ acceptance_gates:
   applied_boundary_hit_rate: 0.3
   applied_compression_coverage: 0.4
   applied_stability_jaccard: 0.5
+  applied_boundary_hit_margin: 0.05
+  applied_compression_margin: 0.05
+  applied_topology_separation_ratio: 1.2
 
 # --- Output ---
 output_dir: experiments/outputs

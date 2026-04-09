@@ -1,15 +1,17 @@
 """
-PC-04: Compression-Robustness Frontier
-========================================
+Controlled Mechanistic Study: Compression-Robustness Frontier
+=============================================================
 
-Paper claim
-    SYNAPSE remains robust under corruption and tighter memory budgets
+Controlled support evidence:
+    SYNAPSE maintains feature quality under severe memory constraints
     better than naive compression.
 
 Methodology
     Sweep memory budget K and corruption sigma. Measure feature quality
     score for UniformSample, AnchorOnly, and SYNAPSE.
     CRITICAL FIX: Never mutate the shared config object.
+    (Note: The mean(abs(feat)) surrogate metric used here is exploratory
+    and ad-hoc; it is not a headline metric).
 
 Outputs
     figures/
@@ -69,8 +71,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: SYNAPSE improves the compression-performance frontier",
-        "SYNAPSE remains robust under corruption and tighter budgets",
+        "Controlled support evidence: robustness to constraints and noise",
+        "SYNAPSE maintains feature quality under noise better than baselines (exploratory proxy)",
     )
     capsule = setup_run(cfg, "compression_robustness")
     csv_rows: list[dict] = []

@@ -1,6 +1,6 @@
 """
-Applied Dataset Audit
-======================
+Primary Applied Validation: Dataset Audit
+=========================================
 
 First gate for all applied-data experiments. Verifies data integrity
 before any SYNAPSE analysis runs.

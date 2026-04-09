@@ -1,5 +1,5 @@
 """
-Dataset adapters for paper-claims experiments.
+Dataset adapters for SYNAPSE empirical experiments.
 """
 
 from __future__ import annotations

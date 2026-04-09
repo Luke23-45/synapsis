@@ -1,8 +1,8 @@
 """
-PC-07: Pilot Diagnostics
-==========================
+Diagnostic: Pilot Data Analysis
+===============================
 
-Paper claim
+Diagnostic evidence:
     Anchors and topological summaries align with meaningful phase
     structure in pilot data.
 
@@ -10,6 +10,7 @@ Methodology
     Load in-house episodes (or synthetic fallback). Run SYNAPSE on
     each episode. Report anchor count, phase entropy, and topology
     mass as diagnostic statistics. No training needed.
+    (Note: Synthetic fallback is expected when real data isn't available).
 
 Outputs
     figures/
@@ -76,8 +77,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: qualitative and diagnostic support on local data",
-        "Anchors and topology align with meaningful phase structure",
+        "Diagnostic evidence: qualitative and statistical support on local data",
+        "Anchors and topology align with meaningful phase structure (internal analysis)",
     )
     capsule = setup_run(cfg, "pilot_diagnostics")
     csv_rows: list[dict] = []

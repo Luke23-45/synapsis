@@ -1,8 +1,8 @@
 """
-PC-06: Ablation Study
-======================
+Downstream Compatibility: Ablation Study
+========================================
 
-Paper claim
+Downstream compatibility evidence:
     Gains arise from the intended memory mechanism; ablating topology
     or anchor scoring degrades performance measurably.
 
@@ -13,6 +13,7 @@ Methodology
       - Remove topology (anchors only)
       - Raw delta scorer (r=1, no refractory)
       - Proxy-only topology (no persistence diagrams)
+    (Note: This is extension/tertiary evidence, not the fundamental claim).
 
 Outputs
     figures/ablation_accuracy.{png,pdf}
@@ -82,8 +83,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: gains arise from the intended memory mechanism",
-        "Ablations isolate topology and anchor scoring contributions",
+        "Downstream compatibility evidence: gains arise from intended mechanism",
+        "Ablations isolate topology and anchor scoring contributions (tertiary study)",
     )
     capsule = setup_run(cfg, "ablation_study")
     csv_rows: list[dict] = []

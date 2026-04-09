@@ -1,1 +1,1 @@
-"""Pilot experiments: internal diagnostics and exploratory studies."""
+"""Diagnostic layer: internal pilot data analysis and exploratory studies."""

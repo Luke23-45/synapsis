@@ -1,1 +1,1 @@
-"""Foundation experiments: core mathematical verification on synthetic sequences."""
+"""Secondary empirical layer: controlled mechanistic studies on synthetic sequences."""

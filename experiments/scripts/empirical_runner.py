@@ -38,22 +38,22 @@ from experiments.utils.model_io import create_run_capsule, save_config_snapshot,
 
 # Registry: short name -> module path
 EXPERIMENTS = {
-    # Foundation: core mathematical verification (PC-01 .. PC-04)
-    "event_sparse_recovery": "experiments.empirical.src.foundation.event_sparse_recovery",
-    "memory_sufficiency":    "experiments.empirical.src.foundation.memory_sufficiency",
-    "topology_value_probe":  "experiments.empirical.src.foundation.topology_value_probe",
-    "compression_robustness":"experiments.empirical.src.foundation.compression_robustness",
-    # Benchmarks: public data & ablations (PC-05, PC-06)
-    "public_benchmark":      "experiments.empirical.src.benchmarks.public_benchmark",
-    "ablation_study":        "experiments.empirical.src.benchmarks.ablation_study",
-    # Pilot: internal diagnostics (PC-07)
-    "pilot_diagnostics":     "experiments.empirical.src.pilot.pilot_diagnostics",
-    # Robotics: real-trajectory applied validation (AP-00 .. AP-04)
+    # === Primary Layer: Real Trajectory Validation (no training) ===
     "dataset_audit":              "experiments.empirical.src.robotics.dataset_audit",
     "anchor_phase_alignment":     "experiments.empirical.src.robotics.anchor_phase_alignment",
     "compression_retention":      "experiments.empirical.src.robotics.compression_retention",
     "topology_structure":         "experiments.empirical.src.robotics.topology_structure",
     "stability_sensitivity":      "experiments.empirical.src.robotics.stability_sensitivity",
+    # === Secondary Layer: Controlled Mechanistic Studies ===
+    "event_sparse_recovery": "experiments.empirical.src.foundation.event_sparse_recovery",
+    "memory_sufficiency":    "experiments.empirical.src.foundation.memory_sufficiency",
+    "topology_value_probe":  "experiments.empirical.src.foundation.topology_value_probe",
+    "compression_robustness":"experiments.empirical.src.foundation.compression_robustness",
+    # === Tertiary Layer: Downstream Compatibility ===
+    "public_benchmark":      "experiments.empirical.src.benchmarks.public_benchmark",
+    "ablation_study":        "experiments.empirical.src.benchmarks.ablation_study",
+    # === Diagnostic Layer ===
+    "pilot_diagnostics":     "experiments.empirical.src.pilot.pilot_diagnostics",
 }
 
 # Per-experiment config file mapping
@@ -125,7 +125,7 @@ def run_single(name: str, cfg, verbose: bool) -> ExperimentReport:
 def run_all(verbose: bool, strict: bool) -> bool:
     print()
     print("=" * 62)
-    print(" SYNAPSE EMPIRICAL EXPERIMENT SUITE ".center(62))
+    print(" SYNAPSE EMPIRICAL VALIDATION SUITE ".center(62))
     print(" experiments/empirical/ ".center(62))
     print("=" * 62)
     print(f"  Started: {_timestamp()}")
@@ -178,7 +178,7 @@ def run_all(verbose: bool, strict: bool) -> bool:
         experiment_id="EMPIRICAL_SUITE",
         experiment_name="Empirical Paper Experiments",
         formal_reference="experiments/empirical/*",
-        claim="All empirical paper claims verified",
+        claim="All empirical validation layers verified",
         status="PASS" if passed else "FAIL",
         total_cases=sum(r.total_cases for r in reports),
         passed_cases=sum(r.passed_cases for r in reports),

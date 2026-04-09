@@ -1,8 +1,8 @@
 """
-Applied Stability & Sensitivity
-==================================
+Primary Applied Validation: Stability & Sensitivity
+===================================================
 
-Paper claim
+Primary applied validation evidence:
     SYNAPSE memory is robust to realistic perturbations on real
     robotics trajectories.
 
@@ -136,8 +136,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: memory is robust to realistic perturbations",
-        "SYNAPSE anchors and topology are stable under noise, drops, truncation",
+        "Primary applied validation evidence: representations are stable under noise",
+        "Features degrade gracefully under applied perturbation",
     )
     capsule = setup_run(cfg, "applied_stability_sensitivity")
     csv_rows: list[dict] = []

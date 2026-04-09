@@ -1,5 +1,5 @@
 """
-Config loading and validation for paper-claims experiments.
+Config loading and validation for SYNAPSE empirical experiments.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def _to_plain(value: Any) -> Any:
 def load_config(path: str | Path) -> SimpleNamespace:
     config_path = Path(path)
     if not config_path.exists():
-        raise FileNotFoundError(f"Paper-claims config not found: {config_path}")
+        raise FileNotFoundError(f"Empirical config not found: {config_path}")
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     return _to_namespace(data)
 

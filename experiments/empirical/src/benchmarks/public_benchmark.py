@@ -1,10 +1,11 @@
 """
-PC-05: Public Benchmark (State-Only)
-======================================
+Downstream Compatibility: Public Benchmark (State-Only)
+=======================================================
 
-Paper claim
-    SYNAPSE matches or exceeds strong state-based baselines on
-    temporally demanding offline imitation tasks.
+Downstream compatibility evidence:
+    SYNAPSE representations integrate cleanly into standard downstream 
+    learning pipelines and improve terminal accuracy.
+    (Note: This is tertiary evidence; the primary contribution is non-training).
 
 Methodology
     Load public benchmark episodes (or synthetic fallback).
@@ -93,8 +94,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: downstream offline-control utility on a public benchmark",
-        "SYNAPSE matches or exceeds baselines on offline imitation tasks",
+        "Downstream compatibility evidence: terminal accuracy on standard pipelines",
+        "SYNAPSE representations integrate seamlessly and improve terminal accuracy",
     )
     capsule = setup_run(cfg, "public_benchmark")
     csv_rows: list[dict] = []

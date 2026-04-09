@@ -1,5 +1,5 @@
 """
-Shared experiment helpers for empirical paper experiments.
+Shared experiment helpers for SYNAPSE empirical validation suite.
 
 Provides:
   - Report creation and finalization

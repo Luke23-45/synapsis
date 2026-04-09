@@ -1,8 +1,8 @@
 """
-PC-01: Event-Sparse Recovery
-==============================
+Controlled Mechanistic Study: Event-Sparse Recovery
+===================================================
 
-Paper claim
+Controlled support evidence:
     SYNAPSE anchor selection recovers salient events more robustly
     than naive schemes under nuisance variation.
 
@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 
 EXPERIMENT_ID = "PC-01"
 EXPERIMENT_NAME = "Event-Sparse Recovery"
-FORMAL_REF = "Paper claim: salient-event recovery under nuisance variation"
+FORMAL_REF = "Controlled support evidence: salient-event recovery under nuisance variation"
 CLAIM = "SYNAPSE anchor selection recovers meaningful events more robustly than naive schemes"
 
 CSV_FIELDS = [

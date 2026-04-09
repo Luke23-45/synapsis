@@ -1,4 +1,4 @@
-# SYNAPSE Pilot Diagnostics Configuration
+# SYNAPSE Diagnostic Layer: Pilot Data
 # ==========================================
 # Self-contained config for internal diagnostic
 # and exploratory experiments (PC-07).
@@ -15,9 +15,10 @@ memory:
   weights: [1.0, 1.0, 1.0, 1.0]
 
 # --- In-house pilot ---
+# Note: Using applied robotics data as pilot if internal paths are empty
 inhouse_pilot:
-  export_root: ""
-  index_json: ""
+  export_root: "applied/robotics/output_data/exports"
+  index_json: "applied/robotics/output_data/raw/final_training_set/training_set_index.json"
   min_episode_length: 20
 
 # --- Acceptance gates ---

@@ -1,14 +1,15 @@
 """
-PC-03: Topology Value Probe
-============================
+Controlled Mechanistic Study: Topology Value Probe
+==================================================
 
-Paper claim
+Controlled support evidence:
     Topology-enhanced memory features resolve structure that local
     event anchors alone miss.
 
 Methodology
-    Train classifiers on topology-variant features.
+    Train lightweight classifiers on topology-variant features.
     Compare anchors-only vs anchors+proxy vs full SYNAPSE.
+    (Note: This uses models as diagnostic probes, not as the main claim).
 
 Outputs
     figures/topology_probe_accuracy.{png,pdf}
@@ -73,8 +74,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: topology contributes beyond anchors alone",
-        "Topology-enhanced features resolve structure that anchors miss",
+        "Controlled support evidence: topology contributes beyond anchors alone",
+        "Topology-enhanced features resolve structure that anchors miss (via lightweight probes)",
     )
     capsule = setup_run(cfg, "topology_value_probe")
     csv_rows: list[dict] = []

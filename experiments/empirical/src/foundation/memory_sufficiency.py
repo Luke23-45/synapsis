@@ -1,14 +1,15 @@
 """
-PC-02: Memory Sufficiency Under Distractors
-=============================================
+Controlled Mechanistic Study: Memory Sufficiency Under Distractors
+==================================================================
 
-Paper claim
+Controlled support evidence:
     SYNAPSE's compressed memory preserves task-relevant information
     better than fixed-window or naive compression baselines.
 
 Methodology
-    Train lightweight classifiers on features from each baseline
-    across 4 task families. Report accuracy +/- std over seeds.
+    Train lightweight learned probes/classifiers on features from each 
+    baseline across 4 task families. Report accuracy +/- std over seeds.
+    (Note: This uses models as diagnostic probes, not as the main claim).
 
 Outputs
     figures/
@@ -130,8 +131,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: compressed memory preserves task-relevant information",
-        "SYNAPSE memory preserves task accuracy better than baselines",
+        "Controlled support evidence: compressed memory preserves task-relevant information",
+        "SYNAPSE memory preserves task accuracy better than baselines (via lightweight probes)",
     )
     capsule = setup_run(cfg, "memory_sufficiency")
     csv_rows: list[dict] = []

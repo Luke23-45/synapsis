@@ -1,8 +1,8 @@
 """
-Applied Topology Structure
-============================
+Primary Applied Validation: Topology Structure
+==============================================
 
-Paper claim
+Primary applied validation evidence:
     Topology summaries distinguish different real trajectory structures.
 
 Methodology
@@ -125,8 +125,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: topology distinguishes trajectory structures",
-        "Persistence summaries separate structurally different real trajectories",
+        "Primary applied validation evidence: meaningful structure in topology",
+        "Topology separates structural groups in real trajectories",
     )
     capsule = setup_run(cfg, "applied_topology_structure")
     csv_rows: list[dict] = []
@@ -231,7 +231,15 @@ def run_experiment(cfg=None, verbose: bool = False):
             "mean_mass": round(float(np.mean(group_mass[g])), 6)}
         for g in groups
     }
-    report.metadata["acceptance_passed"] = len(groups) >= 1
+    
+    gate = getattr(cfg.acceptance_gates, "applied_topology_separation_ratio", 1.0)
+    
+    if len(groups) >= 2 and ratio is not None:
+        report.metadata["acceptance_passed"] = bool(ratio >= gate)
+        log.info("AP-03 topology separation ratio: %.4f (gate: %.4f)", ratio, gate)
+    else:
+        report.metadata["acceptance_passed"] = False
+        log.warning("AP-03 failed: not enough groups for separation analysis.")
 
     return finalize_and_save(report, capsule, csv_rows, CSV_FIELDS, cfg)
 

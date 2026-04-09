@@ -1,1 +1,1 @@
-"""Benchmark experiments: public data comparisons and ablation studies."""
+"""Tertiary empirical layer: downstream compatibility evidence (training-based)."""

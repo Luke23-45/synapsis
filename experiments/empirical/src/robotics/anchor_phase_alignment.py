@@ -1,8 +1,8 @@
 """
-Applied Anchor-Phase Alignment
-================================
+Primary Applied Validation: Anchor-Phase Alignment
+==================================================
 
-Paper claim
+Primary applied validation evidence:
     SYNAPSE anchors are not arbitrary; they correspond to semantically
     important transitions in real robotics trajectories.
 
@@ -58,8 +58,8 @@ EXPERIMENT_ID = "AP-01"
 EXPERIMENT_NAME = "Anchor-Phase Alignment"
 
 CSV_FIELDS = [
-    "episode_id", "method", "num_anchors", "num_boundaries",
-    "boundary_hit_rate", "mean_distance", "anchor_concentration",
+    "episode_id", "method", "num_anchors", "num_expert_boundaries", "num_phase_boundaries",
+    "expert_state_hit_rate", "phase_hit_rate", "mean_distance", "anchor_concentration",
     "phase_purity", "passed",
 ]
 
@@ -168,8 +168,8 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     report = start_report(
         EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Paper claim: anchors correspond to semantically important transitions",
-        "SYNAPSE anchors align with phase boundaries on real robotics trajectories",
+        "Primary applied validation evidence: anchors correspond to phase transitions",
+        "SYNAPSE anchors align with boundaries on real robotics trajectories",
     )
     capsule = setup_run(cfg, "applied_anchor_phase_alignment")
     csv_rows: list[dict] = []
@@ -179,7 +179,8 @@ def run_experiment(cfg=None, verbose: bool = False):
     tolerance = cfg.applied_data.boundary_tolerance
 
     # Aggregators
-    method_hits: dict[str, list[float]] = {m: [] for m in METHODS}
+    method_expert_hits: dict[str, list[float]] = {m: [] for m in METHODS}
+    method_phase_hits: dict[str, list[float]] = {m: [] for m in METHODS}
     method_dists: dict[str, list[float]] = {m: [] for m in METHODS}
     method_conc: dict[str, list[float]] = {m: [] for m in METHODS}
     method_purity: dict[str, list[float]] = {m: [] for m in METHODS}
@@ -188,16 +189,19 @@ def run_experiment(cfg=None, verbose: bool = False):
         if ep.length < cfg.applied_data.min_episode_length:
             continue
 
-        boundaries = ep.expert_state_boundaries
+        expert_boundaries = ep.expert_state_boundaries
+        phase_boundaries = ep.phase_boundaries
 
         for method in METHODS:
             anchors = _get_anchors(ep, method, cfg)
-            hit = _boundary_hit_rate(anchors, boundaries, tolerance)
-            dist = _mean_distance_to_boundary(anchors, boundaries)
-            conc = _anchor_concentration(anchors, boundaries, tolerance)
+            expert_hit = _boundary_hit_rate(anchors, expert_boundaries, tolerance)
+            phase_hit = _boundary_hit_rate(anchors, phase_boundaries, tolerance)
+            dist = _mean_distance_to_boundary(anchors, phase_boundaries)
+            conc = _anchor_concentration(anchors, phase_boundaries, tolerance)
             pur = _phase_purity(anchors, ep.gt_phase)
 
-            method_hits[method].append(hit)
+            method_expert_hits[method].append(expert_hit)
+            method_phase_hits[method].append(phase_hit)
             method_dists[method].append(dist)
             method_conc[method].append(conc)
             method_purity[method].append(pur)
@@ -206,8 +210,10 @@ def run_experiment(cfg=None, verbose: bool = False):
                 "episode_id": ep.episode_id,
                 "method": method,
                 "num_anchors": len(anchors),
-                "num_boundaries": len(boundaries),
-                "boundary_hit_rate": round(hit, 6),
+                "num_expert_boundaries": len(expert_boundaries),
+                "num_phase_boundaries": len(phase_boundaries),
+                "expert_state_hit_rate": round(expert_hit, 6),
+                "phase_hit_rate": round(phase_hit, 6),
                 "mean_distance": round(dist, 4),
                 "anchor_concentration": round(conc, 6),
                 "phase_purity": round(pur, 6),
@@ -219,31 +225,33 @@ def run_experiment(cfg=None, verbose: bool = False):
     report.duration_seconds = perf_counter() - start
 
     # ---- Publication figures -----------------------------------------------
-    # Figure 1: Summary bar — mean boundary hit rate per method
-    hit_means = {m: float(np.mean(method_hits[m])) if method_hits[m] else 0.0 for m in METHODS}
-    hit_stds = {m: float(np.std(method_hits[m])) if method_hits[m] else 0.0 for m in METHODS}
+    # Figure 1: Summary bar — mean phase boundary hit rate per method
+    hit_means = {m: float(np.mean(method_phase_hits[m])) if method_phase_hits[m] else 0.0 for m in METHODS}
+    hit_stds = {m: float(np.std(method_phase_hits[m])) if method_phase_hits[m] else 0.0 for m in METHODS}
 
     plot_bar(
         list(hit_means.keys()), list(hit_means.values()),
-        "Boundary Hit Rate by Method",
+        "Phase Boundary Hit Rate by Method",
         "Hit Rate",
         capsule.figures / "anchor_alignment_summary",
         cfg.plotting.formats, cfg.plotting.theme,
         errors=list(hit_stds.values()),
     )
 
-    # Figure 2: Grouped bar — all 4 metrics per method
-    metric_names = ["Hit Rate", "Concentration", "Phase Purity"]
+    # Figure 2: Grouped bar — all metrics per method
+    metric_names = ["Expert Hit", "Phase Hit", "Concentration", "Phase Purity"]
     grouped_vals: dict[str, list[float]] = {}
     grouped_errs: dict[str, list[float]] = {}
     for m in METHODS:
         grouped_vals[m] = [
-            float(np.mean(method_hits[m])) if method_hits[m] else 0.0,
+            float(np.mean(method_expert_hits[m])) if method_expert_hits[m] else 0.0,
+            float(np.mean(method_phase_hits[m])) if method_phase_hits[m] else 0.0,
             float(np.mean(method_conc[m])) if method_conc[m] else 0.0,
             float(np.mean(method_purity[m])) if method_purity[m] else 0.0,
         ]
         grouped_errs[m] = [
-            float(np.std(method_hits[m])) if method_hits[m] else 0.0,
+            float(np.std(method_expert_hits[m])) if method_expert_hits[m] else 0.0,
+            float(np.std(method_phase_hits[m])) if method_phase_hits[m] else 0.0,
             float(np.std(method_conc[m])) if method_conc[m] else 0.0,
             float(np.std(method_purity[m])) if method_purity[m] else 0.0,
         ]
@@ -259,11 +267,15 @@ def run_experiment(cfg=None, verbose: bool = False):
 
     # Acceptance
     synapse_hit = hit_means.get("SYNAPSE", 0.0)
-    gate = cfg.acceptance_gates.applied_boundary_hit_rate
-    report.metadata["acceptance_passed"] = bool(synapse_hit >= gate)
+    best_baseline = max(hit_means.get(m, 0.0) for m in ["UniformSample", "DeltaThreshold"])
+    margin = synapse_hit - best_baseline
+    gate = getattr(cfg.acceptance_gates, "applied_boundary_hit_margin", 0.0)
+    
+    report.metadata["acceptance_passed"] = bool(margin >= gate)
     report.metadata["method_hit_rates"] = hit_means
-    log.info("AP-01 SYNAPSE boundary hit rate: %.4f (gate: %.4f)",
-             synapse_hit, gate)
+    report.metadata["acceptance_margin"] = margin
+    log.info("AP-01 SYNAPSE phase boundary hit rate margin: %.4f (gate: %.4f)",
+             margin, gate)
 
     return finalize_and_save(report, capsule, csv_rows, CSV_FIELDS, cfg)
 

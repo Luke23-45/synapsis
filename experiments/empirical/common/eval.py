@@ -1,5 +1,5 @@
 """
-Training and evaluation helpers for broader-paper experiments.
+Training and evaluation helpers for SYNAPSE empirical experiments (secondary/tertiary layers).
 """
 
 from __future__ import annotations
