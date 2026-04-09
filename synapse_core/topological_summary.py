@@ -41,6 +41,11 @@ def _check_ripser_available() -> bool:
         return False
 
 
+def has_full_persistence_backend() -> bool:
+    """Return True when a higher-dimensional persistence backend is available."""
+    return _check_gudhi_available() or _check_ripser_available()
+
+
 def compute_persistence_diagrams(
     cloud: np.ndarray,
     Q: int,
@@ -131,7 +136,13 @@ def _compute_with_ripser(
     """Compute persistence using ripser library."""
     from ripser import ripser
 
-    result = ripser(cloud, maxdim=Q, thresh=max_edge_length)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'ignore',
+            message='The input point cloud has more columns than rows; did you mean to transpose?',
+            category=UserWarning,
+        )
+        result = ripser(cloud, maxdim=Q, thresh=max_edge_length, distance_matrix=False)
 
     diagrams = [[] for _ in range(Q + 1)]
     for q in range(min(Q + 1, len(result["dgms"]))):

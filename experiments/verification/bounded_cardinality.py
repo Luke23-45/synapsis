@@ -167,6 +167,28 @@ def run_experiment(
                 details={"expected": len(cps), "actual": len(indices), "K": K},
                 error=None if passed else f"|I*|={len(indices)} != {len(cps)}",
             ))
+            csv_rows.append({
+                "K": K,
+                "r": r,
+                "tau": tau,
+                "T": T,
+                "num_trials": 1,
+                "max_m_observed": len(indices),
+                "passed": passed,
+            })
+            append_metrics_jsonl(
+                {
+                    "case": f"saturation_K{K}_r{r}",
+                    "K": K,
+                    "r": r,
+                    "tau": tau,
+                    "T": T,
+                    "num_trials": 1,
+                    "max_m_observed": len(indices),
+                    "passed": passed,
+                },
+                capsule.metrics / "metrics.jsonl",
+            )
 
     report.duration_seconds = timer.elapsed
     report.finalize()

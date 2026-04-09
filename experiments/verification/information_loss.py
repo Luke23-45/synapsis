@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from synapse_core.event_encoder import sharp_event_score
 from synapse_core.anchor_selector import select_anchors
-from synapse_core.memory_operator import M
+from synapse_core.memory_operator import M, MemoryState
 from experiments.utils.config import load_config, validate, ExperimentConfig, get_experiment_overrides
 from experiments.utils.model_io import create_run_capsule, save_config_snapshot, save_run_pointer
 from experiments.utils.logging import setup_run_logging
@@ -49,15 +49,35 @@ CLAIM = "There exist distinct x != y with M(x) = M(y)"
 CSV_FIELDS = ["K", "num_trajectories", "collisions", "collision_rate"]
 
 
-def _memory_fingerprint(result: dict) -> tuple:
-    """Create a hashable fingerprint of a memory operator result."""
-    anchors = result["anchor_indices"]
-    if len(anchors) > 0:
-        scores = tuple(round(float(s), 12)
-                       for s in result["event_scores"][anchors])
-    else:
-        scores = ()
-    return (tuple(anchors), scores)
+def _round_array(values: np.ndarray, decimals: int = 12) -> tuple:
+    """Convert an array to a rounded, hashable tuple."""
+    if values.size == 0:
+        return ()
+    return tuple(np.round(values.astype(np.float64).ravel(), decimals=decimals).tolist())
+
+
+def _memory_fingerprint(result: MemoryState) -> tuple:
+    """Create a hashable fingerprint of the formal memory output M(x)."""
+    anchor_tuple = tuple(
+        (
+            round(float(anchor.t), 12),
+            _round_array(anchor.s),
+            int(anchor.delta),
+            round(float(anchor.xi), 12),
+        )
+        for anchor in result.anchors
+    )
+    diagrams_tuple = tuple(
+        tuple(
+            (
+                round(float(birth), 12),
+                round(float(death), 12) if np.isfinite(death) else float("inf"),
+            )
+            for birth, death in diagram
+        )
+        for diagram in result.persistence_diagrams
+    )
+    return (anchor_tuple, diagrams_tuple)
 
 
 def run_experiment(
@@ -103,32 +123,26 @@ def run_experiment(
 
         for trial in iter_progress(range(num_collision_attempts),
                                    desc="constructive collision"):
-            K_c, T_c = 3, 50
-            cps = [10, 25, 40]
-            traj_x, _ = piecewise_constant(
-                d, T_c, cps, jump_magnitude=tau * 20,
-                seed=rng.integers(0, 2**31),
-            )
-            traj_y = traj_x.copy()
-            # Perturb non-anchor positions by tiny amount
-            for i in range(T_c):
-                if i not in cps:
-                    traj_y[i] += rng.standard_normal(d) * tau * 0.01
+            T_c = 50
+            step_scale = tau * 0.05
+            step_x = rng.standard_normal((T_c - 1, d)) * step_scale
+            step_y = rng.standard_normal((T_c - 1, d)) * step_scale
+            traj_x = np.vstack([np.zeros((1, d)), np.cumsum(step_x, axis=0)])
+            traj_y = np.vstack([np.zeros((1, d)), np.cumsum(step_y, axis=0)])
 
             scores_x = sharp_event_score(traj_x)
             scores_y = sharp_event_score(traj_y)
-            idx_x, _ = select_anchors(scores_x, traj_x, K_c, r, tau)
-            idx_y, _ = select_anchors(scores_y, traj_y, K_c, r, tau)
+            if np.any(scores_x[1:] >= tau) or np.any(scores_y[1:] >= tau):
+                continue
 
-            if idx_x == idx_y:
-                res_x = M(traj_x, K=K_c, r=r, tau=tau, weights=weights, Q=Q)
-                res_y = M(traj_y, K=K_c, r=r, tau=tau, weights=weights, Q=Q)
-                fp_x = _memory_fingerprint(res_x)
-                fp_y = _memory_fingerprint(res_y)
-                if fp_x == fp_y and not np.array_equal(traj_x, traj_y):
-                    collision_found = True
-                    log.info("  Collision found at trial %d", trial)
-                    break
+            res_x = M(traj_x, K=3, r=r, tau=tau, weights=weights, Q=Q)
+            res_y = M(traj_y, K=3, r=r, tau=tau, weights=weights, Q=Q)
+            fp_x = _memory_fingerprint(res_x)
+            fp_y = _memory_fingerprint(res_y)
+            if fp_x == fp_y and not np.array_equal(traj_x, traj_y):
+                collision_found = True
+                log.info("  Collision found at trial %d", trial)
+                break
 
         report.add_case(TestCase(
             name="constructive_collision", passed=collision_found,

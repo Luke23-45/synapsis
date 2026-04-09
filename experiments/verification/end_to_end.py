@@ -23,7 +23,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from synapse_core.memory_operator import M
+from synapse_core.memory_operator import M, MemoryState
 from experiments.utils.config import load_config, validate, ExperimentConfig, get_experiment_overrides
 from experiments.utils.model_io import create_run_capsule, save_config_snapshot, save_run_pointer
 from experiments.utils.logging import setup_run_logging
@@ -46,16 +46,16 @@ CSV_FIELDS = ["case_name", "category", "d", "T", "passed", "error"]
 
 
 def _validate_result(
-    result: dict,
+    result: MemoryState,
     traj: np.ndarray,
     K: int,
     tau: float,
     Q: int,
 ) -> tuple[bool, str | None]:
     """Validate M output structure and formal invariants."""
-    indices = result.get("anchor_indices", [])
-    scores  = result.get("event_scores")
-    diagrams = result.get("persistence_diagrams")
+    indices = result.anchor_indices
+    scores = result.event_scores
+    diagrams = result.persistence_diagrams
 
     # No NaN/Inf in scores
     if scores is not None and (np.any(np.isnan(scores)) or np.any(np.isinf(scores))):
@@ -187,7 +187,7 @@ def run_experiment(
                        weights=weights, Q=Q)
 
             if case_label == "K0":
-                valid = len(result["anchor_indices"]) == 0
+                valid = len(result.anchor_indices) == 0
                 err = None if valid else "K=0 but anchors selected"
             else:
                 valid, err = _validate_result(result, traj, K_e, params["tau"], Q)
@@ -211,8 +211,7 @@ def run_experiment(
         # ---- Hysteretic mode -----------------------------------------------
         for alpha in alpha_values:
             traj = rng.standard_normal((100, 5))
-            result = M(traj, K=K, r=r, tau=tau, weights=weights, Q=Q,
-                       encoder="hysteretic", alpha=alpha)
+            result = M(traj, K=K, r=r, tau=tau, weights=weights, Q=Q, alpha=alpha)
             valid, err = _validate_result(result, traj, K, tau, Q)
 
             case_name = f"hysteretic_alpha{alpha}"

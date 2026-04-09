@@ -1,0 +1,77 @@
+memory:
+  K: 8
+  r: 2
+  tau: 0.45
+  Q: 1
+  weights: [1.0, 1.0, 1.0, 1.0]
+
+synthetic_tasks:
+  state_dim: 6
+  seq_len: 64
+  train_samples: 240
+  val_samples: 80
+  test_samples: 80
+  topology_train_samples: 200
+  topology_test_samples: 80
+  event_recovery_trials: 72
+  noise_levels: [0.02, 0.05, 0.1]
+  distractor_levels: [0.15, 0.35, 0.55]
+  task_families:
+    - delayed_retrieval
+    - ordered_trigger_response
+    - phase_conditioned_decision
+    - revisit_dependent_rule_switching
+
+baselines:
+  hidden_dim: 64
+  window_size: 12
+  families: [B0, B1, B2, B3, B4, B5, B6]
+  anchor_only_family: B4
+  full_family: B6
+
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  smoke_epochs: 2
+  full_epochs: 8
+  smoke_samples: 48
+  num_seeds: 3
+  device: cpu
+
+public_benchmark:
+  dataset_path: ""
+  smoke_use_synthetic_fallback: true
+  seq_len: 48
+  state_dim: 12
+  action_dim: 4
+  train_episodes: 12
+  test_episodes: 6
+  low_data_fraction: 0.5
+
+inhouse_pilot:
+  export_root: applied/robotics/output_data/exports
+  index_json: applied/robotics/output_data/raw/final_training_set/training_set_index.json
+  min_episode_length: 32
+
+stress_tests:
+  memory_budgets: [4, 8, 12]
+  tau_values: [0.25, 0.45, 0.7]
+  refractory_values: [1, 2, 4]
+  corruption_sigmas: [0.0, 0.03, 0.08]
+  truncation_keep: [16, 32, 48]
+  non_anchor_keep_prob: 0.35
+
+acceptance_gates:
+  pc01_f1_margin: 0.02
+  pc02_accuracy_margin: 0.03
+  pc03_topology_gain: 0.03
+  pc04_frontier_margin: 0.02
+  pc05_relative_gain: 0.0
+  pc06_min_drop: 0.01
+
+plotting:
+  theme: publication
+  formats: [png, pdf]
+  dpi: 300
+
+output_dir: experiments/outputs

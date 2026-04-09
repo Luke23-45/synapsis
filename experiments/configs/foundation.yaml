@@ -1,0 +1,80 @@
+# SYNAPSE Foundation Experiments Configuration
+# ================================================
+# Self-contained config for core mathematical verification
+# on synthetic sequences (PC-01 through PC-04).
+#
+# Experiments:
+#   event_sparse_recovery     - anchor selection vs naive schemes
+#   memory_sufficiency        - downstream utility with distractors
+#   topology_value_probe      - persistence diagram gains
+#   compression_robustness    - efficiency under stress
+
+# --- Memory operator parameters ---
+memory:
+  K: 10
+  r: 2
+  tau: 0.5
+  Q: 1
+  weights: [1.0, 1.0, 1.0, 1.0]
+
+# --- Synthetic task generation ---
+synthetic_tasks:
+  seq_len: 100
+  state_dim: 8
+  train_samples: 200
+  val_samples: 50
+  test_samples: 100
+  event_recovery_trials: 30
+  noise_levels: [0.05, 0.15, 0.3]
+  distractor_levels: [0.2, 0.6, 1.2]
+  task_families:
+    - delayed_retrieval
+    - ordered_trigger_response
+    - phase_conditioned_decision
+    - revisit_dependent_rule_switching
+  topology_train_samples: 200
+  topology_test_samples: 80
+
+# --- Baseline configurations ---
+baselines:
+  families: ["B0", "B1", "B2", "B3", "B4", "B5", "B6"]
+  window_size: 20
+  hidden_dim: 64
+  labels:
+    B0: "FixedWindow"
+    B1: "GRU"
+    B2: "Transformer"
+    B3: "UniformSample"
+    B4: "AnchorOnly"
+    B5: "Anchor+Proxy"
+    B6: "SYNAPSE"
+
+# --- Training ---
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  smoke_epochs: 3
+  full_epochs: 30
+  num_seeds: 3
+  device: "cpu"
+
+# --- Stress tests ---
+stress_tests:
+  memory_budgets: [3, 5, 10, 20]
+  corruption_sigmas: [0.0, 0.1, 0.3, 0.5]
+
+# --- Acceptance gates ---
+acceptance_gates:
+  pc01_f1_margin: 0.02
+  pc02_accuracy_margin: 0.02
+  pc03_topology_gain: 0.01
+  pc04_frontier_margin: 0.0
+
+# --- Output ---
+output_dir: experiments/outputs
+
+# --- Plotting ---
+plotting:
+  theme: publication
+  formats: [png, pdf]
+  dpi: 600

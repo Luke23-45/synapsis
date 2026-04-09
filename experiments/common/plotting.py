@@ -365,7 +365,7 @@ def plot_collision_rates(
             collision_rates[i] >= collision_rates[i+1]
             for i in range(len(collision_rates) - 1)
         )
-        label = "Monotonic ✓" if is_monotone else "Non-monotonic ✗"
+        label = "Monotonic PASS" if is_monotone else "Non-monotonic FAIL"
         color = palette[2] if is_monotone else palette[5]
         ax.text(0.98, 0.95, label, transform=ax.transAxes,
                 ha="right", va="top", fontsize=11, color=color,
@@ -419,7 +419,7 @@ def plot_experiment_summary(
                          edgecolor="white", height=0.6)
 
     for i, (bar, (p, t), status) in enumerate(zip(bars, case_counts, statuses)):
-        icon = "✓" if status == "PASS" else "✗"
+        icon = "PASS" if status == "PASS" else "FAIL"
         ax_left.text(bar.get_width() + 0.02, bar.get_y() + bar.get_height() / 2,
                      f"{icon} {p}/{t}", va="center", fontsize=9)
 

@@ -24,7 +24,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from synapse_core.topological_summary import compute_persistence_diagrams
+from synapse_core.topological_summary import (
+    compute_persistence_diagrams, has_full_persistence_backend,
+)
 from experiments.utils.config import load_config, validate, ExperimentConfig, get_experiment_overrides
 from experiments.utils.model_io import create_run_capsule, save_config_snapshot, save_run_pointer
 from experiments.utils.logging import setup_run_logging
@@ -81,6 +83,33 @@ def run_experiment(
         formal_reference=FORMAL_REF, claim=CLAIM,
     )
     csv_rows: list[dict] = []
+    full_backend = has_full_persistence_backend()
+    report.metadata["full_persistence_backend"] = full_backend
+    report.metadata["requested_Q"] = Q
+    if Q > 0 and not full_backend:
+        report.add_case(TestCase(
+            name="full_topology_backend_available",
+            passed=False,
+            details={"requested_Q": Q},
+            error="Neither gudhi nor ripser is installed; only H_0 can be verified in this environment.",
+        ))
+        csv_rows.append({
+            "m": -1,
+            "D": -1,
+            "epsilon": -1.0,
+            "num_perturbations": 0,
+            "max_hausdorff_ratio": float("nan"),
+            "max_bottleneck_ratio": float("nan"),
+            "passed": False,
+        })
+        append_metrics_jsonl(
+            {
+                "case": "full_topology_backend_available",
+                "requested_Q": Q,
+                "passed": False,
+            },
+            capsule.metrics / "metrics.jsonl",
+        )
     # For the summary figure
     eps_for_fig: list[float] = []
     h_ratios_fig: list[float] = []

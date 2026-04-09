@@ -1,0 +1,34 @@
+# SYNAPSE Pilot Diagnostics Configuration
+# ==========================================
+# Self-contained config for internal diagnostic
+# and exploratory experiments (PC-07).
+#
+# Experiments:
+#   pilot_diagnostics    - in-house pilot data analysis
+
+# --- Memory operator parameters ---
+memory:
+  K: 10
+  r: 2
+  tau: 0.5
+  Q: 1
+  weights: [1.0, 1.0, 1.0, 1.0]
+
+# --- In-house pilot ---
+inhouse_pilot:
+  export_root: ""
+  index_json: ""
+  min_episode_length: 20
+
+# --- Acceptance gates ---
+acceptance_gates:
+  pilot_coverage: 0.5
+
+# --- Output ---
+output_dir: experiments/outputs
+
+# --- Plotting ---
+plotting:
+  theme: publication
+  formats: [png, pdf]
+  dpi: 600

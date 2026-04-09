@@ -62,8 +62,8 @@ logs/
 *.temp
 *.bak
 *.swp
-applied
+# applied
 docs
 outputs
 experiments/outputs
-TASKS.md
+# TASKS.md

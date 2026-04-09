@@ -47,7 +47,7 @@ CLAIM = "I*(x_{1:T}) = {c_1,...,c_m} under separation + spacing"
 
 CSV_FIELDS = [
     "d", "K", "r", "tau", "m_target", "spacing_mode",
-    "num_trials", "passed", "fail_trial",
+    "num_trials", "valid_trials", "skipped_trials", "passed", "fail_trial",
 ]
 
 
@@ -98,8 +98,20 @@ def run_experiment(
             all_exact = True
             error_msg = None
             fail_trial = -1
+            valid_trials = 0
+            skipped_trials = 0
+            attempts = 0
 
-            for trial in range(num_trials):
+            while valid_trials < num_trials:
+                attempts += 1
+                if attempts > max(10 * num_trials, 1000):
+                    all_exact = False
+                    error_msg = (
+                        f"Could only realize {valid_trials}/{num_trials} valid trials "
+                        f"under theorem assumptions"
+                    )
+                    break
+
                 seed_t = rng.integers(0, 2**31)
                 m = min(m_target, K)
                 change_points = [1 + i * spacing for i in range(m)]
@@ -117,14 +129,18 @@ def run_experiment(
                     scores[t] < tau for t in range(1, T) if t not in change_points
                 )
                 if not (cp_ok and non_cp_ok):
-                    continue  # assumption violation -- skip
+                    skipped_trials += 1
+                    continue
 
                 indices, _ = select_anchors(scores, traj, K, r, tau)
                 if indices != change_points:
                     all_exact = False
-                    fail_trial = trial
-                    error_msg = f"Trial {trial}: I*={indices} != C={change_points}"
+                    fail_trial = valid_trials
+                    error_msg = (
+                        f"Validated trial {valid_trials}: I*={indices} != C={change_points}"
+                    )
                     break
+                valid_trials += 1
 
                 # Save one sample figure
                 if not sample_fig_done and d == dims[0] and m_target >= 2:
@@ -142,12 +158,14 @@ def run_experiment(
                 name=case_name, passed=all_exact,
                 details={"d": d, "K": K, "r": r, "tau": tau,
                          "m_target": m_target, "spacing": spacing_mode,
-                         "num_trials": num_trials},
+                         "num_trials": num_trials, "valid_trials": valid_trials,
+                         "skipped_trials": skipped_trials},
                 error=error_msg,
             ))
 
             row = {"d": d, "K": K, "r": r, "tau": tau, "m_target": m_target,
                    "spacing_mode": spacing_mode, "num_trials": num_trials,
+                   "valid_trials": valid_trials, "skipped_trials": skipped_trials,
                    "passed": all_exact, "fail_trial": fail_trial}
             csv_rows.append(row)
             append_metrics_jsonl(
@@ -175,6 +193,20 @@ def run_experiment(
             details={"I_star": indices, "expected": change_points},
             error=None if passed else f"I*={indices} != C={change_points}",
         ))
+        csv_rows.append({
+            "d": d_b, "K": K_b, "r": r_b, "tau": tau_b, "m_target": len(change_points),
+            "spacing_mode": "boundary", "num_trials": 1, "valid_trials": 1,
+            "skipped_trials": 0, "passed": passed, "fail_trial": -1,
+        })
+        append_metrics_jsonl(
+            {
+                "case": "boundary_scores_at_tau",
+                "d": d_b, "K": K_b, "r": r_b, "tau": tau_b, "m_target": len(change_points),
+                "spacing_mode": "boundary", "num_trials": 1, "valid_trials": 1,
+                "skipped_trials": 0, "passed": passed, "fail_trial": -1,
+            },
+            capsule.metrics / "metrics.jsonl",
+        )
 
         # Over-budget test
         K_s, r_s, tau_s, d_s = 3, 2, 0.5, 3
@@ -190,6 +222,20 @@ def run_experiment(
             details={"K": K_s, "num_cps": len(change_points_ob), "selected": len(indices)},
             error=None if passed else f"|I*|={len(indices)} != K={K_s}",
         ))
+        csv_rows.append({
+            "d": d_s, "K": K_s, "r": r_s, "tau": tau_s, "m_target": len(change_points_ob),
+            "spacing_mode": "over_budget", "num_trials": 1, "valid_trials": 1,
+            "skipped_trials": 0, "passed": passed, "fail_trial": -1,
+        })
+        append_metrics_jsonl(
+            {
+                "case": "over_budget_m_gt_K",
+                "d": d_s, "K": K_s, "r": r_s, "tau": tau_s, "m_target": len(change_points_ob),
+                "spacing_mode": "over_budget", "num_trials": 1, "valid_trials": 1,
+                "skipped_trials": 0, "passed": passed, "fail_trial": -1,
+            },
+            capsule.metrics / "metrics.jsonl",
+        )
 
     report.duration_seconds = timer.elapsed
     report.finalize()
