@@ -1,0 +1,42 @@
+# NTH-Attention Large Model Configuration (~300M+ trainable parameters)
+# For scaling experiments with more compute
+
+# =========================================================================
+# NTH-ATTENTION TRANSFORMER (Module 3)
+# =========================================================================
+d_model: 1024
+num_heads: 16
+num_layers: 16
+dropout: 0.1
+max_seq_len: 512
+
+# V1 parameters (backward compatibility)
+ffn_ratio: 4.0
+lambda_geo_init: 0.5
+use_cross_attention: true
+
+# V2 SOTA parameters (GQA + DropPath)
+num_kv_heads: null
+drop_path_rate: 0.1
+
+# =========================================================================
+# VISION ENCODER (SigLIP)
+# =========================================================================
+vision_backbone: "google/siglip-large-patch16-224"
+vision_hidden_dim: 1024
+vision_patch_size: 16
+freeze_vision: true
+unfreeze_last_n: 4
+use_gradient_checkpointing: true
+num_views: 3
+use_siglip: true
+
+# =========================================================================
+# FLOW MATCHING ACTION HEAD (Pi0-style)
+# =========================================================================
+action_chunk_size: 8
+action_head_layers: 6
+action_head_heads: 16
+flow_steps_train: 1
+flow_steps_inference: 10
+use_separate_heads: true

@@ -1,0 +1,23 @@
+# Temporal Sampler Configuration (Module 1)
+
+# =========================================================================
+# ANCHOR SELECTION
+# =========================================================================
+num_anchors: 16
+proprio_horizon: 256
+
+# =========================================================================
+# V1 PARAMETERS (backward compatibility)
+# =========================================================================
+gate_hidden_dim: 128
+gumbel_temperature: 1.0
+use_dftopk: false
+compute_durations: true
+
+# =========================================================================
+# V2 SOTA PARAMETERS (TCN + Sinkhorn)
+# =========================================================================
+tcn_channels: [64, 64, 64]
+hysteresis_tau_init: 0.5
+sinkhorn_epsilon: 0.05
+sinkhorn_iters: 20

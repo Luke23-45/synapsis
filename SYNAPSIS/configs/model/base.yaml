@@ -1,0 +1,42 @@
+# NTH-Attention Base Model Configuration (~93M trainable params)
+# Matches Octo-Base scale - recommended for most experiments
+
+# =========================================================================
+# NTH-ATTENTION TRANSFORMER (Module 3)
+# =========================================================================
+d_model: 768
+num_heads: 12
+num_layers: 12
+dropout: 0.1
+max_seq_len: 512
+
+# V1 parameters (backward compatibility)
+ffn_ratio: 4.0
+lambda_geo_init: 0.5
+use_cross_attention: true
+
+# V2 SOTA parameters (GQA + DropPath)
+num_kv_heads: null  # null = standard MHA, set to 2 or 4 for GQA
+drop_path_rate: 0.1
+
+# =========================================================================
+# VISION ENCODER (SigLIP)
+# =========================================================================
+vision_backbone: "google/siglip-base-patch16-224"
+vision_hidden_dim: 768
+vision_patch_size: 16
+freeze_vision: true
+unfreeze_last_n: 3
+use_gradient_checkpointing: true
+num_views: 3
+use_siglip: true
+
+# =========================================================================
+# FLOW MATCHING ACTION HEAD (Pi0-style)
+# =========================================================================
+action_chunk_size: 8
+action_head_layers: 4
+action_head_heads: 8
+flow_steps_train: 1
+flow_steps_inference: 10
+use_separate_heads: true

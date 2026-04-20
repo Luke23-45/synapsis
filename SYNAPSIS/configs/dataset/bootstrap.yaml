@@ -1,0 +1,25 @@
+# SOTA Ultimate Quality Bootstrap Config (v5.0)
+seed: 12345
+output_dir: "output_data/bootstrap/"
+config_template: "SYNAPSIS/configs/dataset/generate.yaml"
+
+# Curriculum Scaling
+curriculum_stages: 5
+anneal_start: 1.0
+anneal_end: 0.1             # Lower end for maximum independence
+exponential_anneal: true    # Continuous SOTA decay logic
+
+# Joint Robustness Scheduling
+data_aug_noise: 0.005       # Start with very clean data
+noise_max: 0.04             # End with high-noise robust data
+
+# AWR Refinement
+# DISABLED: The utils.rl_refiner module is not implemented yet.
+# Setting to true will cause a crash during the post-processing phase.
+rl_refine: false
+
+# Advantage Calculator Parameters
+adv_params:
+  gamma: 0.99
+  lambda: 0.95
+  beta_cost: 0.5

@@ -1,0 +1,31 @@
+# NTH-Attention Root Configuration
+# Composes defaults from subconfigs
+
+defaults:
+  - model: base
+  - training: default
+  - sampler: default
+  - projector: default
+  - _self_
+
+# =========================================================================
+# INPUT DIMENSIONS
+# =========================================================================
+proprio_dim: 22
+action_dim: 8
+image_size: 224
+image_channels: 3
+
+# =========================================================================
+# INFRASTRUCTURE PATHS (Global)
+# =========================================================================
+train_path: "output_data/expert_demos.lmdb"
+val_path: "output_data/expert_demos.lmdb"
+urdf_path: "envs/urdf/panda.urdf"
+xml_path: "envs/panda_pick_place.xml"
+
+# =========================================================================
+# DEVICE AND DTYPE
+# =========================================================================
+device: "cuda"
+dtype: "float32"

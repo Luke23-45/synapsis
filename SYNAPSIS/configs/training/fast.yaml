@@ -1,0 +1,15 @@
+# Fast Training Configuration for Debugging
+
+defaults:
+  - default  # Inherit from default
+
+# =========================================================================
+# OVERRIDES FOR FAST DEBUGGING
+# =========================================================================
+max_epochs: 5
+batch_size: 8
+warmup_steps: 100
+val_check_interval: 1.0  # Validate once per epoch
+
+# Disable expensive features
+use_amp: false

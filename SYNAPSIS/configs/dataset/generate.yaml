@@ -1,0 +1,43 @@
+# SOTA Dataset Generation Config
+run_name: "prod_gen"
+num_episodes: 4
+num_workers: 2
+seed: 42
+output_dir: "output_data/raw/"
+
+# Environment Paths
+urdf_path: "envs/urdf/panda.urdf"
+xml_path: "envs/panda_pick_place.xml"
+
+# Robot Configuration
+control_mode: "absolute"
+recording_mode: "cartesian_delta"
+grasp_width: 0.6
+action_scaling_factor: 0.5
+
+# Expert Parameters
+expert_config:
+  noise_level: 0.01
+  failure_timeout_steps: 500
+
+# Serialization
+image_compression: "jpeg"
+jpeg_quality: 90
+
+# ==============================================================================
+# CURRICULUM SETTINGS (REMOVED)
+# ==============================================================================
+# Curriculum staging has been replaced by Domain Randomization and Single-Pass Generation.
+
+
+# ==============================================================================
+# ADVANTAGE CALCULATION SETTINGS
+# ==============================================================================
+# These parameters are used by advantage_calculator.py.
+advantage:
+  gamma: 0.99                  # Discount factor
+  lambda: 0.95                 # GAE lambda
+  beta_cost: 0.5               # Cost weight for safe AWR
+  huber_delta: 1.0             # Robust loss parameter
+  pessimistic_clip: 0.0        # Clip advantages below this value
+  time_weight: 0.5             # Weight for time baseline vs phase baseline

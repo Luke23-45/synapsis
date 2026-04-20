@@ -1,0 +1,21 @@
+# Geometric Projector Configuration (Module 2)
+
+# =========================================================================
+# GEOMETRY SETTINGS
+# =========================================================================
+ssm_normalize: true
+distance_metric: "euclidean"  # euclidean, cosine, manhattan, learned
+use_learned_metric: false
+return_spatial_bias: true
+use_topo_regularization: true
+
+# =========================================================================
+# CNN ARCHITECTURE
+# =========================================================================
+cnn_channels: [32, 64, 128, 256]
+
+# =========================================================================
+# V2 PARAMETERS (Hyperbolic + Diffusion)
+# =========================================================================
+diffusion_scales: [1, 2, 4]
+inception_dropout: 0.1

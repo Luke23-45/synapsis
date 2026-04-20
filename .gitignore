@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Data and Output
+output_data/
+datasets/*.lmdb
+*.lmdb
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.npz
+
+# Model Checkpoints
+checkpoints/
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+
+# Hydra
+hydra/
+outputs/
+multirun/
+
+# Weights & Biases
+wandb/
+
+# Logs
+logs/
+*.log
+tensorboard/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+working/
+
+# OS
+Thumbs.db
+.DS_Store
+docs
