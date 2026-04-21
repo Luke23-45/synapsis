@@ -49,7 +49,8 @@ logger.setLevel(logging.INFO)
 REPLAY_POS_TOL = 0.03  # 3 cm tolerance [cite: 219]
 REPLAY_ORN_TOL = 5.0 * np.pi / 180.0  # 5 degrees in radians [cite: 219]
 
-# A minimal observation schema: keys with expected shapes/dtypes
+# Observation schema: keys with expected shapes/dtypes
+# Updated to include all modalities that are actually stored and read.
 OBS_SCHEMA = {
     "image_primary": ("uint8", (None, None, 3)),
     "proprio": ("float32", (None,)),
@@ -58,11 +59,20 @@ OBS_SCHEMA = {
     "object_pos_world": ("float32", (3,)),
     "object_orn_world": ("float32", (4,)),
     "goal_pos_world": ("float32", (3,)),
+    "goal_orn_world": ("float32", (4,)),
+    "goal_size_world": ("float32", (3,)),
     "is_grasped": ("float32", (1,)),
     "gripper_qpos": ("float32", (None,)),
-    "robot_base_pos_world": ("float32", (3,)), 
-    "base_quat": ("float32", (4,)), 
-    # you can add more keys if needed
+    "robot_base_pos_world": ("float32", (3,)),
+    "robot_base_quat_world": ("float32", (4,)),
+    "base_quat": ("float32", (4,)),
+    "object_vel": ("float32", (6,)),
+    "ee_vel": ("float32", (6,)),
+    "gripper_vel": ("float32", (2,)),
+    "expert_target_pose": ("float32", (7,)),
+    "delta_ee_pose": ("float32", (7,)),
+    "gt_phase": ("int32", (1,)),
+    "gt_gripper": ("float32", (1,)),
 }
 
 # ==============================================================================
@@ -73,11 +83,12 @@ OBS_SCHEMA = {
 
 def compute_delta_ee_pose(target_pose: np.ndarray, current_pose: np.ndarray, base_quat: np.ndarray) -> np.ndarray:
     """
-    [SOTA v3.0] Computes the delta end-effector pose in the ROBOT BASE FRAME.
+    [SOTA v3.1] Computes the delta end-effector pose in the ROBOT BASE FRAME.
     
-    This function computes the displacement vector and transforms it from the 
-    World Frame into the Robot Base Frame using the provided base orientation.
-    This is the definitive SOTA representation.
+    Both position and orientation are expressed as deltas (relative displacements).
+    Position delta is transformed from World Frame into Robot Base Frame.
+    Orientation delta is the relative rotation from current to target,
+    expressed in the Robot Base Frame.
     
     Args:
         target_pose: (7,) [x, y, z, qx, qy, qz, qw] - Expert target in world frame
@@ -86,17 +97,26 @@ def compute_delta_ee_pose(target_pose: np.ndarray, current_pose: np.ndarray, bas
         
     Returns:
         delta_pose: (7,) [dx, dy, dz, qx, qy, qz, qw] - Delta position (Base Frame) 
-                                                      + absolute orientation (World Frame)
+                                                      + delta orientation (Base Frame)
     """
-    # 1. Compute delta in World Frame
+    # 1. Compute delta position in World Frame
     delta_pos_world = target_pose[:3] - current_pose[:3]
     
-    # 2. Transform delta into Robot Base Frame
+    # 2. Transform delta position into Robot Base Frame
     R_base_world = R.from_quat(base_quat)
     delta_pos_base = R_base_world.inv().apply(delta_pos_world)
     
-    abs_orn = target_pose[3:]  # Keep orientation absolute (World Frame) for stability
-    return np.concatenate([delta_pos_base, abs_orn]).astype(np.float32)
+    # 3. Compute delta orientation: relative rotation from current to target
+    R_current = R.from_quat(current_pose[3:])
+    R_target = R.from_quat(target_pose[3:])
+    R_delta_world = R_current.inv() * R_target
+    
+    # 4. Express delta orientation in Robot Base Frame
+    R_base_inv = R_base_world.inv()
+    R_delta_base = R_base_inv * R_delta_world
+    
+    delta_orn_xyzw = R_delta_base.as_quat().astype(np.float32)
+    return np.concatenate([delta_pos_base, delta_orn_xyzw]).astype(np.float32)
 
 # ==============================================================================
 # 1. STATE-OF-THE-ART DATASET WRITER
@@ -472,8 +492,15 @@ class ExpertTrajectoryDataset(Dataset):
         with open(self.index_path, "r") as f:
             index_data = json.load(f)
 
+        self.recording_mode = index_data.get("recording_mode", None)
+        self.control_mode = index_data.get("control_mode", None)
         self.episode_metadata = index_data["episodes"]
         self.metadata = index_data.get("metadata", {})
+
+        if self.recording_mode:
+            logger.info(f"Dataset recording_mode: {self.recording_mode}, control_mode: {self.control_mode}")
+        else:
+            logger.warning("Dataset index has no recording_mode stored. Cannot validate action semantics. Regenerate dataset with updated writer.")
 
         # --- 2. Build the Virtual Index ---
         # We calculate the number of valid chunks in each episode.
@@ -747,7 +774,6 @@ class ExpertTrajectoryDataset(Dataset):
             # [SOTA FIX] Return DEEP COPY to prevent cache corruption !!
             # The cache holds the original; readers get a safe copy.
             return copy.deepcopy(pickle.loads(blob))
-            return data
 
         else:
             raise ValueError(f"Unknown compression type: {compression}")
@@ -1032,10 +1058,11 @@ class ExpertDataset(IterableDataset):
                 raise ValueError(f"Key {k} has shape {arr.shape}, expected at least dims {shape_tpl}")
             # we could enforce exact dims for fixed-length keys
     
-    def _generate_one(self, current_obs: Dict) -> Tuple[Dict, np.ndarray, np.ndarray, bool]: 
+    def _generate_one(self, current_obs: Dict) -> Tuple[Dict, np.ndarray, np.ndarray, bool, np.ndarray, dict]: 
         """
-        Produces (obs, sim_action, data_action, ik_failed_flag).
+        Produces (obs, sim_action, data_action, ik_failed_flag, pose_world, expert_info).
         Captures Expert ground truth metadata.
+        Returns pose_world and expert_info to avoid a second get_target_pose call.
         """
         # Unpack 3 values: Pose, Action, Info (Metadata)
         pose_world, gripper_act, expert_info = self._scripted_expert.get_target_pose(current_obs) 
@@ -1130,7 +1157,7 @@ class ExpertDataset(IterableDataset):
         current_obs["expert_state_str"] = expert_info["expert_state_str"]
         current_obs["expert_source"] = 0
         
-        return current_obs, sim_action, action, ik_failed
+        return current_obs, sim_action, action, ik_failed, pose_world, expert_info
 
 
     def __iter__(self) -> Iterator[Tuple[Dict, np.ndarray]]:
@@ -1161,11 +1188,7 @@ class ExpertDataset(IterableDataset):
                     for _ in range(self._env.max_episode_steps):
                         # Use the refactored _generate_one which handles sim vs dataset actions
                         current_obs = self._env.get_expert_obs()
-                        _, sim_action, dataset_action, ik_failed = self._generate_one(current_obs)
-                        
-                        # Retrieve target info for caching the ground truth trajectory
-                        # (Internal state of expert is already updated by _generate_one's call)
-                        pose_world, _, info = self._scripted_expert.get_target_pose(current_obs)
+                        _, sim_action, dataset_action, ik_failed, pose_world, info = self._generate_one(current_obs)
 
                         # --- FIX: CACHE NUMPY ARRAYS ONLY ---
                         step_snapshot = {
@@ -1193,23 +1216,56 @@ class ExpertDataset(IterableDataset):
                         
                         # 1. Sparse Sampling via Phase-Specific Rates
                         # This balances the dataset by reducing redundant transit/stalling frames.
+                        # [M3 FIX] Track per-state counts to enforce min_keep and avoid
+                        # overrepresenting transition frames.
+                        state_entry_indices = {}  # state_str -> first index in that state
+                        state_count = {}          # state_str -> number of kept frames
                         for i, step_data in enumerate(cached_steps):
                             state_str = step_data.get("expert_state_str", "UNKNOWN")
                             keep_prob = self.phase_sampling_rates.get(state_str, self.p_motion_frame)
                             
-                            # Probabilistic keep
-                            keep = (self._rng.random() < keep_prob)
-                            
-                            # Always keep the very first frame of a new state to preserve transitions
-                            if i > 0:
+                            # Detect state transition (first frame of a new state)
+                            is_transition = False
+                            if i == 0:
+                                is_transition = True
+                            else:
                                 prev_state = cached_steps[i-1].get("expert_state_str", "UNKNOWN")
                                 if state_str != prev_state:
-                                    keep = True
+                                    is_transition = True
+                            
+                            if is_transition:
+                                state_entry_indices[state_str] = i
+                                state_count[state_str] = state_count.get(state_str, 0)
+                            
+                            # Always keep transition entry frames
+                            if is_transition:
+                                keep = True
                             else:
-                                keep = True # Always keep first frame of episode
+                                # Probabilistic keep for non-transition frames
+                                keep = (self._rng.random() < keep_prob)
                             
                             if keep: 
                                 indices_to_keep.append(i)
+                                state_count[state_str] = state_count.get(state_str, 0) + 1
+                        
+                        # Enforce min_keep_per_state: if a state has fewer kept frames
+                        # than the minimum, uniformly sample additional frames from it.
+                        for state_str, entry_idx in state_entry_indices.items():
+                            kept = state_count.get(state_str, 0)
+                            if kept < self.min_keep_per_state:
+                                # Find all indices belonging to this state
+                                state_indices = [
+                                    j for j, sd in enumerate(cached_steps)
+                                    if sd.get("expert_state_str", "UNKNOWN") == state_str
+                                ]
+                                # Find which ones are already kept
+                                already_kept = set(indices_to_keep) & set(state_indices)
+                                candidates = [j for j in state_indices if j not in already_kept]
+                                needed = self.min_keep_per_state - kept
+                                if candidates:
+                                    extra = self._rng.choice(candidates, size=min(needed, len(candidates)), replace=False)
+                                    for e in extra:
+                                        indices_to_keep.append(int(e))
                         
                         # 2. Force Last Frame (Ensures EPISODE_DONE is captured)
                         last_idx = len(cached_steps) - 1

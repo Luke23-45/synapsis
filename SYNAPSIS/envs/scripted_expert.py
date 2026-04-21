@@ -286,14 +286,6 @@ class ScriptedExpert:
         
         return hover_height
     
-    def _clamp_to_workspace(self, pos: np.ndarray) -> np.ndarray:
-        """Clamps position to safe workspace bounds."""
-        pos = pos.copy()
-        pos[0] = np.clip(pos[0], *self.cfg.workspace["x"])
-        pos[1] = np.clip(pos[1], *self.cfg.workspace["y"])
-        pos[2] = np.clip(pos[2], *self.cfg.workspace["z"])
-        return pos
-
     def _handle_failure(self):
         """
         Handles any timeout or failure. If the failure occurs before the object

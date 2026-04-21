@@ -167,7 +167,9 @@ class NTHDataset(Dataset):
             return self.base_dataset.get_observation(ep_idx, t)
         elif hasattr(self.base_dataset, '__getitem__'):
             # Standard __getitem__ interface
-            return self.base_dataset[ep_idx * 1000 + t]  # Adjust as needed
+            # M6 FIX: Use episode length from metadata instead of magic number 1000
+            ep_len = getattr(self.base_dataset, 'get_episode_length', lambda e: 1000)(ep_idx)
+            return self.base_dataset[ep_idx * ep_len + t]
         else:
             raise AttributeError("Base dataset has no get_observation or __getitem__ method")
     
@@ -196,10 +198,10 @@ class NTHDataset(Dataset):
                 proprio_list.append(self._get_proprio(ep_idx, i))
             proprio_seq = np.stack(proprio_list, axis=0)
         
-        # Pad if necessary
+        # Pad if necessary (M5 FIX: use zero-padding instead of repeating first obs)
         if len(proprio_seq) < self.proprio_horizon:
             pad_len = self.proprio_horizon - len(proprio_seq)
-            pad = np.tile(proprio_seq[0:1], (pad_len, 1))
+            pad = np.zeros((pad_len, proprio_seq.shape[1]), dtype=proprio_seq.dtype)
             proprio_seq = np.concatenate([pad, proprio_seq], axis=0)
         
         return proprio_seq

@@ -160,14 +160,31 @@ def flatten_data_for_csv(episode: Dict[str, Any]) -> List[Dict[str, Any]]:
             "joint_4": obs.get("arm_joints", [0]*7)[4],
             "joint_5": obs.get("arm_joints", [0]*7)[5],
             "joint_6": obs.get("arm_joints", [0]*7)[6],
-            # EE Pose World (7 dims)
+            # EE Pose World (7 dims) - Current EE
             "ee_x": obs["ee_pose_world"][0], "ee_y": obs["ee_pose_world"][1], "ee_z": obs["ee_pose_world"][2],
             "ee_qx": obs["ee_pose_world"][3], "ee_qy": obs["ee_pose_world"][4], 
             "ee_qz": obs["ee_pose_world"][5], "ee_qw": obs["ee_pose_world"][6],
-            # SOTA Delta EE Pose (if available)
+            # SOTA Delta EE Pose (if available) - Recorded delta
             "delta_x": obs.get("delta_ee_pose", [0]*7)[0],
             "delta_y": obs.get("delta_ee_pose", [0]*7)[1],
             "delta_z": obs.get("delta_ee_pose", [0]*7)[2],
+            "delta_qx": obs.get("delta_ee_pose", [0]*7)[3],
+            "delta_qy": obs.get("delta_ee_pose", [0]*7)[4],
+            "delta_qz": obs.get("delta_ee_pose", [0]*7)[5],
+            "delta_qw": obs.get("delta_ee_pose", [0]*7)[6],
+            # [VERIFICATION] Expert Target Pose (7 dims) - For verifying cartesian_delta
+            "target_x": obs.get("expert_target_pose", [0]*7)[0],
+            "target_y": obs.get("expert_target_pose", [0]*7)[1],
+            "target_z": obs.get("expert_target_pose", [0]*7)[2],
+            "target_qx": obs.get("expert_target_pose", [0]*7)[3],
+            "target_qy": obs.get("expert_target_pose", [0]*7)[4],
+            "target_qz": obs.get("expert_target_pose", [0]*7)[5],
+            "target_qw": obs.get("expert_target_pose", [0]*7)[6],
+            # [VERIFICATION] Robot Base Quaternion (4 dims)
+            "base_qx": obs.get("robot_base_quat_world", [0,0,0,1])[0],
+            "base_qy": obs.get("robot_base_quat_world", [0,0,0,1])[1],
+            "base_qz": obs.get("robot_base_quat_world", [0,0,0,1])[2],
+            "base_qw": obs.get("robot_base_quat_world", [0,0,0,1])[3],
             # Object Pose
             "obj_x": obs["object_pos_world"][0], "obj_y": obs["object_pos_world"][1], "obj_z": obs["object_pos_world"][2],
             # Goal Pose

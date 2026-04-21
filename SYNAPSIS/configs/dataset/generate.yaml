@@ -1,13 +1,13 @@
-# SOTA Dataset Generation Config
-run_name: "prod_gen"
-num_episodes: 4
+# SOTA Dataset Generation Config - Production Training Data
+run_name: "expert_pick_place"
+num_episodes: 500
 num_workers: 2
-seed: 42
-output_dir: "output_data/raw/"
+seed: 12345
+output_dir: "output_data/expert_demos/"
 
 # Environment Paths
-urdf_path: "envs/urdf/panda.urdf"
-xml_path: "envs/panda_pick_place.xml"
+urdf_path: "SYNAPSIS/envs/urdf/panda.urdf"
+xml_path: "SYNAPSIS/envs/panda_pick_place.xml"
 
 # Robot Configuration
 control_mode: "absolute"
@@ -29,6 +29,19 @@ jpeg_quality: 90
 # ==============================================================================
 # Curriculum staging has been replaced by Domain Randomization and Single-Pass Generation.
 
+
+# ==============================================================================
+# DATASET SPLIT SETTINGS
+# ==============================================================================
+# When enabled, generates separate train/ and val/ directories with
+# independent, complete LMDB datasets. When disabled, a single dataset
+# is produced (current behavior).
+dataset_split:
+  enable: true
+  train_episodes: 500           # Number of episodes for the training set
+  val_episodes: 50              # Number of episodes for the validation set
+  val_seed_offset: 500000       # Added to base seed for val generation (ensures no overlap)
+  val_run_name_suffix: "_val"  # Appended to run_name for the validation dataset
 
 # ==============================================================================
 # ADVANTAGE CALCULATION SETTINGS

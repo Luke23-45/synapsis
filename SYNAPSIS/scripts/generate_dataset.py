@@ -42,7 +42,7 @@ def load_config(path: str) -> dict:
     with open(path, "r") as f:
         return yaml.safe_load(f)
 
-def merge_sota_shards(shard_dirs: list[Path], out_dir: Path, run_name: str, total_target: int, use_episode_target: bool):
+def merge_sota_shards(shard_dirs: list[Path], out_dir: Path, run_name: str, total_target: int, use_episode_target: bool, cfg: Optional[dict] = None):
     """
     Merges SOTA-formatted shards by combining their JSON indexes and copying
     the LMDB files into a single, unified dataset directory.
@@ -59,6 +59,14 @@ def merge_sota_shards(shard_dirs: list[Path], out_dir: Path, run_name: str, tota
     merged_index = {"episodes": [], "metadata": {}}
     total_episodes = 0
     all_keys_in_use = set()
+
+    # [M7 FIX] Store config hash so downstream consumers can verify dataset provenance
+    if cfg is not None:
+        cfg_json = json.dumps(cfg, sort_keys=True)
+        merged_index["config_hash"] = hashlib.sha256(cfg_json.encode()).hexdigest()[:16]
+
+    # [H8 FIX] Accumulators for normalization statistics (per-modality mean/std)
+    norm_accumulators = {}  # modality -> {sum, sum_sq, count}
 
     # We need a central LMDB writer for the merged data
     final_lmdb_path = final_dataset_path / f"{final_dataset_name}.lmdb"
@@ -125,11 +133,38 @@ def merge_sota_shards(shard_dirs: list[Path], out_dir: Path, run_name: str, tota
 
                         merged_index["episodes"].append(new_ep_meta)
                         total_episodes += 1
+
+                        # [H8 FIX] Accumulate normalization stats from episode metadata
+                        for mod_name, mod_meta in ep_meta.get("modalities", {}).items():
+                            if mod_name in ("image_primary", "image_wrist"):
+                                continue  # Skip images for normalization
+                            ep_len = mod_meta.get("length", 0)
+                            if ep_len <= 0:
+                                continue
+                            if mod_name not in norm_accumulators:
+                                norm_accumulators[mod_name] = {"sum": 0.0, "sum_sq": 0.0, "count": 0}
+                            # Use per-episode stats if available, otherwise skip
+                            ep_mean = mod_meta.get("mean")
+                            ep_var = mod_meta.get("var")
+                            if ep_mean is not None and ep_var is not None:
+                                norm_accumulators[mod_name]["sum"] += ep_mean * ep_len
+                                norm_accumulators[mod_name]["sum_sq"] += (ep_var + ep_mean**2) * ep_len
+                                norm_accumulators[mod_name]["count"] += ep_len
                 shard_env.close()
 
     finally:
         final_env.sync()
         final_env.close()
+
+    # [H8 FIX] Compute final normalization statistics from accumulators
+    norm_stats = {}
+    for mod_name, acc in norm_accumulators.items():
+        if acc["count"] > 0:
+            mean = acc["sum"] / acc["count"]
+            var = (acc["sum_sq"] / acc["count"]) - mean**2
+            norm_stats[mod_name] = {"mean": float(mean), "std": float(np.sqrt(max(var, 0.0))), "count": int(acc["count"])}
+    if norm_stats:
+        merged_index["normalization"] = norm_stats
 
     final_index_path = final_dataset_path / f"{final_dataset_name}_index.json"
     with open(final_index_path, "w") as f:
@@ -233,23 +268,26 @@ def worker_loop_fn_SOTA(worker_id: int, cfg: dict, shard_dir_path_str: str,
         except Exception: pass
         raise
 
-def main():
-    parser = argparse.ArgumentParser(description="Robust dataset generation (LMDB-sharded)")
-    parser.add_argument("--config", default="SYNAPSIS/configs/dataset/generate.yaml", help="YAML config")
-    parser.add_argument("--out_dir", default=None, help="Final output directory (overrides config)")
-    parser.add_argument("--resume", action="store_true", help="Resume mode (do not clobber existing shards)")
-    args = parser.parse_args()
+def robust_rmtree(path, retries=3):
+    """Robustly delete directory (handles Windows file locking)."""
+    for i in range(retries):
+        try:
+            if path.exists():
+                shutil.rmtree(path)
+            return
+        except Exception:
+            if i < retries - 1:
+                time.sleep(1.0)
+            else:
+                logger.warning(f"Could not fully delete {path} after retries. Proceeding anyway.")
 
-    cfg = load_config(args.config)
-    
-    if args.resume and "seed" in cfg:
-        logger.info(f"Resume mode: Shifting base seed {cfg['seed']} by +999999 to avoid duplicates.")
-        cfg["seed"] = int(cfg["seed"]) + 999999
 
-    out_dir = Path(args.out_dir) if args.out_dir else Path(cfg["output_dir"])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    
-    run_name = cfg.get("run_name", time.strftime("%Y%m%d_%H%M%S"))
+def _run_generation(cfg: dict, out_dir: Path, run_name: str, resume: bool = False) -> bool:
+    """
+    Core generation logic. Spawns workers, merges shards, produces final LMDB dataset.
+    Returns True on success, False on failure.
+    """
+
     num_workers = int(cfg.get("num_workers", 0))
 
     shards_base_dir = out_dir / "shards"
@@ -270,19 +308,6 @@ def main():
     worker_processes = []
     shard_dirs_to_merge = []
 
-    # [HELPER] Robustly delete directory (handles Windows locking)
-    def robust_rmtree(path, retries=3):
-        for i in range(retries):
-            try:
-                if path.exists():
-                    shutil.rmtree(path)
-                return
-            except Exception:
-                if i < retries - 1:
-                    time.sleep(1.0)
-                else:
-                    logger.warning(f"Could not fully delete {path} after retries. Proceeding anyway.")
-
     if num_workers > 0:
         # [SOTA PATCH] Infrastructure Pre-flight: Check total pre-allocation space
         from SYNAPSIS.utils.lmdb_utils import calculate_lmdb_map_size_gb, check_disk_space
@@ -292,7 +317,7 @@ def main():
         logger.info(f"PRE-FLIGHT: Total disk buffer required for {num_workers} workers: {total_preallocate_gb:.2f} GB")
         if not check_disk_space(str(shards_base_dir), total_preallocate_gb):
             logger.error("❌ CRITICAL: Insufficient disk space for parallel workers. Aborting to prevent OS lockup.")
-            sys.exit(1)
+            return False
 
         for w in range(num_workers):
             shard_dir = shards_base_dir / f"worker_{w}"
@@ -300,7 +325,7 @@ def main():
             shard_dirs_to_merge.append(shard_dir)
 
             # [PATCH] Aggressive Directory Cleaning
-            if args.resume:
+            if resume:
                 if summary_file.exists():
                     try:
                         with open(summary_file, 'r') as f:
@@ -336,7 +361,7 @@ def main():
         summary_file = shard_dir / "summary.json"
         shard_dirs_to_merge.append(shard_dir)
         
-        if not args.resume and shard_dir.exists():
+        if not resume and shard_dir.exists():
             logger.info(f"Cleaning existing shard directory: {shard_dir}")
             robust_rmtree(shard_dir)
         
@@ -351,7 +376,7 @@ def main():
             worker_loop_fn_SOTA(**worker_kwargs)
         except Exception:
             logger.exception("Single-threaded generation failed")
-            return
+            return False
 
     logger.info(f"All worker shards written to subdirectories in: {shards_base_dir}")
 
@@ -372,10 +397,10 @@ def main():
             except Exception:
                 all_workers_succeeded = False
 
-    if all_workers_succeeded or args.resume:
+    if all_workers_succeeded or resume:
         if not all_workers_succeeded:
             logger.warning("Resuming and merging despite some workers failing. The dataset may be smaller than targeted.")
-        merged_count = merge_sota_shards(shard_dirs_to_merge, out_dir, run_name, total_target, use_episode_target)
+        merged_count = merge_sota_shards(shard_dirs_to_merge, out_dir, run_name, total_target, use_episode_target, cfg=cfg)
         logger.info(f"Merged episodes count: {merged_count}")
         # Optional: Clean up shard directories after successful merge
         try:
@@ -384,11 +409,117 @@ def main():
             pass
     else:
         logger.error("One or more workers failed and not in resume mode. Skipping final merge.")
+        return False
+
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Robust dataset generation (LMDB-sharded)")
+    parser.add_argument("--config", default="SYNAPSIS/configs/dataset/generate.yaml", help="YAML config")
+    parser.add_argument("--out_dir", default=None, help="Final output directory (overrides config)")
+    parser.add_argument("--resume", action="store_true", help="Resume mode (do not clobber existing shards)")
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+
+    original_seed = int(cfg.get("seed", 0))
+    if args.resume and "seed" in cfg:
+        logger.info(f"Resume mode: Shifting base seed {cfg['seed']} by +999999 to avoid duplicates.")
+        cfg["seed"] = int(cfg["seed"]) + 999999
+
+    out_dir = Path(args.out_dir) if args.out_dir else Path(cfg["output_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    run_name = cfg.get("run_name", time.strftime("%Y%m%d_%H%M%S"))
+
+    # ==================================================================
+    # DATASET SPLIT LOGIC
+    # ==================================================================
+    split_cfg = cfg.get("dataset_split", {})
+    split_enabled = bool(split_cfg.get("enable", False))
+
+    if split_enabled:
+        train_episodes = int(split_cfg.get("train_episodes", cfg.get("num_episodes", 100)))
+        val_episodes = int(split_cfg.get("val_episodes", 10))
+        val_seed_offset = int(split_cfg.get("val_seed_offset", 500000))
+        val_run_name_suffix = split_cfg.get("val_run_name_suffix", "_val")
+
+        train_dir = out_dir / "train"
+        val_dir = out_dir / "val"
+
+        # --- TRAIN SPLIT ---
+        logger.info("=" * 60)
+        logger.info("DATASET SPLIT: Generating TRAIN set")
+        logger.info(f"  Train episodes: {train_episodes}")
+        logger.info(f"  Output: {train_dir}")
+        logger.info("=" * 60)
+
+        train_cfg = copy.deepcopy(cfg)
+        train_cfg["num_episodes"] = train_episodes
+        train_cfg["output_dir"] = str(train_dir)
+        train_run_name = run_name
+
+        train_ok = _run_generation(train_cfg, train_dir, train_run_name, resume=args.resume)
+        if not train_ok:
+            logger.error("❌ Train split generation failed. Aborting.")
+            sys.exit(1)
+        logger.info("✅ Train split generation complete.\n")
+
+        # --- VAL SPLIT ---
+        logger.info("=" * 60)
+        logger.info("DATASET SPLIT: Generating VALIDATION set")
+        logger.info(f"  Val episodes: {val_episodes}")
+        logger.info(f"  Seed offset: +{val_seed_offset}")
+        logger.info(f"  Output: {val_dir}")
+        logger.info("=" * 60)
+
+        val_cfg = copy.deepcopy(cfg)
+        val_cfg["num_episodes"] = val_episodes
+        val_cfg["seed"] = int(cfg.get("seed", 0)) + val_seed_offset
+        val_cfg["output_dir"] = str(val_dir)
+        val_run_name = run_name + val_run_name_suffix
+
+        val_ok = _run_generation(val_cfg, val_dir, val_run_name, resume=args.resume)
+        if not val_ok:
+            logger.error("❌ Validation split generation failed.")
+            sys.exit(1)
+        logger.info("✅ Validation split generation complete.")
+
+        # --- SPLIT MANIFEST ---
+        manifest = {
+            "split_enabled": True,
+            "original_seed": original_seed,
+            "resume_seed_offset_applied": 999999 if args.resume else 0,
+            "train": {
+                "episodes": train_episodes,
+                "seed": int(cfg.get("seed", 0)),
+                "run_name": train_run_name,
+                "path": str(train_dir),
+            },
+            "val": {
+                "episodes": val_episodes,
+                "seed": int(cfg.get("seed", 0)) + val_seed_offset,
+                "seed_offset": val_seed_offset,
+                "run_name": val_run_name,
+                "path": str(val_dir),
+            },
+        }
+        manifest_path = out_dir / "split_manifest.json"
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+        logger.info(f"Split manifest written to: {manifest_path}")
+
+    else:
+        # --- SINGLE DATASET (original behavior) ---
+        logger.info("DATASET SPLIT: Disabled. Generating single dataset.")
+        ok = _run_generation(cfg, out_dir, run_name, resume=args.resume)
+        if not ok:
+            logger.error("❌ Dataset generation failed.")
+            sys.exit(1)
 
     logger.info("Dataset generation complete.")
 
+
 if __name__ == "__main__":
     main()
-
-
-# python -m scripts.generate_dataset --config "configs\gen_dataset_config.yaml" 
