@@ -25,6 +25,8 @@ dependencies = [
     "cvxpy>=1.4.0",
     "cvxpylayers>=0.1.6",
     "scikit-learn>=1.3.0",
+    "gudhi>=3.8.0",
+    "ripser>=0.6.4",
 ]
 
 [project.optional-dependencies]
