@@ -23,14 +23,14 @@ architecture:
 
 # ── Data ─────────────────────────────────────────────────────────────────
 data:
-  n_episodes: 100
+  n_episodes: 20
 
 trajectory:
   T: 80
 
 # ── Training ─────────────────────────────────────────────────────────────
 training:
-  full_epochs: 30
+  full_epochs: 10
   lr: 1.0e-3
   batch_size: 16
   patience: 8
