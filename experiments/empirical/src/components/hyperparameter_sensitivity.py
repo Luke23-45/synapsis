@@ -27,7 +27,7 @@ from experiments.common.trajectory_generators import piecewise_constant
 from experiments.empirical.common.metrics import match_f1
 from experiments.empirical.common.seed_runner import run_multi_seed
 from experiments.empirical.common.emp_config import load_emp_config
-from experiments.empirical.common.math_utils import make_orthogonal_W, ridge_probe_accuracy
+from experiments.empirical.common.math_utils import make_orthogonal_W, ridge_probe_accuracy, pad_rows
 from experiments.empirical.common.data_saver import save_experiment_npz
 
 log = logging.getLogger(__name__)
@@ -92,9 +92,10 @@ def _ridge_probe_from_memory(
 
     for traj, label in trajs_labels:
         state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="osqp")
-        cloud_flat = state.point_cloud.flatten().astype(np.float32)
+        cloud_padded = pad_rows(state.point_cloud, K)
+        cloud_flat = cloud_padded.flatten().astype(np.float32)
         topo = summarize_diagrams(state.persistence_diagrams)
-        feat = np.concatenate([cloud_flat[:K * k], topo])
+        feat = np.concatenate([cloud_flat, topo])
         features.append(feat)
         labels.append(label)
 

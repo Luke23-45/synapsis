@@ -176,13 +176,15 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
                 continue
             sim = torch.mm(centroids, centroids.T) / 0.1
             label_eq = (batch_l.unsqueeze(0) == batch_l.unsqueeze(1)).float()
-            label_eq.fill_diagonal_(0)
+            # Out-of-place mask instead of fill_diagonal_
+            diag_mask = (1.0 - torch.eye(B, device=label_eq.device))
+            label_eq = label_eq * diag_mask
             pos_count = label_eq.sum(dim=1)
             valid = pos_count > 0
             if not valid.any():
                 continue
             exp_sim = torch.exp(sim)
-            exp_sim.fill_diagonal_(0)
+            exp_sim = exp_sim * diag_mask
             pos_sum = (exp_sim * label_eq).sum(dim=1)
             all_sum = exp_sim.sum(dim=1)
             loss = -torch.log(pos_sum / all_sum.clamp_min(1e-8) + 1e-8)
