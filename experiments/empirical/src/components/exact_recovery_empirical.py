@@ -143,6 +143,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     nodom_ok = 0
     nodom_total = 0
     all_margins: List[float] = []
+    trajs: List[np.ndarray] = []
 
     configs_A = [
         (trial, mag, noise, lam)
@@ -159,6 +160,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
             continue
 
         traj = _generate_trajectory_with_known_events(d, T, C, mag, noise, rng)
+        trajs.append(traj)
         y_star, I_star = _run_pipeline(traj, K, r, lam)
         margin = _dominance_margin(y_star, C)
         all_margins.append(margin)
