@@ -99,7 +99,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         K = int(rng.choice(K_values))
         r = int(rng.choice(r_values))
         lam = float(rng.choice(lam_values))
-        y_star = solve_relaxed_selector(sal, K, r, lam, solver="scipy")
+        y_star = solve_relaxed_selector(sal, K, r, lam, solver="osqp")
 
         reference = hard_projection(y_star, K, r)
         det_total += 1
@@ -125,7 +125,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         traj = generate_trajectory(d, T, rng)
         scores = sharp_event_score(traj)
         sal = normalize_saliency(scores, mode="identity")
-        y_star = solve_relaxed_selector(sal, K, r, lam, solver="scipy")
+        y_star = solve_relaxed_selector(sal, K, r, lam, solver="osqp")
         I_star = hard_projection(y_star, K, r)
 
         checks = _check_all_properties(I_star, K, r, y_star)

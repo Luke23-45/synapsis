@@ -43,7 +43,7 @@ def _extract_anchors_numpy(
     """Run Z2 core operator up to anchor vector extraction. Returns V [m, d+3]."""
     traj_f64 = trajectory.astype(np.float64)
     scores = sharp_event_score(traj_f64)
-    y_star = solve_relaxed_selector(scores, K, r, lam, solver="scipy")
+    y_star = solve_relaxed_selector(scores, K, r, lam, solver="osqp")
     indices = hard_projection(y_star, K, r)
     if not indices:
         return np.zeros((0, traj_f64.shape[1] + 3), dtype=np.float64)

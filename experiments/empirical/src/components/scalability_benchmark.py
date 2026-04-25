@@ -67,10 +67,10 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
 
             # Warm-up (first call may have JIT/cache overhead)
             if rep == 0 and T_val == T_values[0]:
-                compute_memory(traj, K_default, r, lam, W_Theta, Q, solver="scipy")  # warm-up
+                compute_memory(traj, K_default, r, lam, W_Theta, Q, solver="osqp")  # warm-up
 
             t0 = time.perf_counter()
-            compute_memory(traj, K_default, r, lam, W_Theta, Q, solver="scipy")
+            compute_memory(traj, K_default, r, lam, W_Theta, Q, solver="osqp")
             elapsed = time.perf_counter() - t0
             times.append(elapsed)
 
@@ -88,7 +88,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
             W_Theta = make_orthogonal_W(k, D, rng)
 
             t0 = time.perf_counter()
-            compute_memory(traj, K_val, r, lam, W_Theta, Q, solver="scipy")
+            compute_memory(traj, K_val, r, lam, W_Theta, Q, solver="osqp")
             elapsed = time.perf_counter() - t0
             times.append(elapsed)
 
@@ -115,7 +115,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     # Relaxed selector timing
     t0 = time.perf_counter()
     for _ in range(n_repeats):
-        y_star = solve_relaxed_selector(scores, K_default, r, lam, solver="scipy")
+        y_star = solve_relaxed_selector(scores, K_default, r, lam, solver="osqp")
     results["C_selector_mean_ms"] = (time.perf_counter() - t0) / n_repeats * 1000.0
 
     # Hard projection timing
@@ -136,7 +136,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     # Full operator timing
     t0 = time.perf_counter()
     for _ in range(n_repeats):
-        compute_memory(traj_prof, K_default, r, lam, W_Theta_prof, Q, solver="scipy")
+        compute_memory(traj_prof, K_default, r, lam, W_Theta_prof, Q, solver="osqp")
     results["C_full_operator_mean_ms"] = (time.perf_counter() - t0) / n_repeats * 1000.0
 
     save_experiment_jsonl("EMP-07", seed, results_list, config.output_dir)

@@ -138,7 +138,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
                             d, T, num_segments, int(rng.integers(2**31)),
                         )
                         W_Theta = _make_orthogonal_W(k, D, rng)
-                        state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="scipy")
+                        state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="osqp")
 
                         hit_rate = _boundary_hit_rate(
                             state.anchor_indices, gt_boundaries, boundary_tolerance,
@@ -191,7 +191,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
                 d, T, num_segments, int(rng.integers(2**31)),
             )
             W_Theta = _make_orthogonal_W(k, D, rng)
-            state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="scipy")
+            state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="osqp")
             coverage = _boundary_hit_rate(state.anchor_indices, gt_boundaries, boundary_tolerance)
             efficiency = len(state.anchors) / K if K > 0 else 0.0
             coverages.append(coverage)
@@ -219,7 +219,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
             else:
                 mu, sigma = None, None
             state = compute_memory(
-                traj, K, r, lam, W_Theta, Q, mu=mu, sigma=sigma, solver="scipy",
+                traj, K, r, lam, W_Theta, Q, mu=mu, sigma=sigma, solver="osqp",
             )
             hit = _boundary_hit_rate(state.anchor_indices, gt_boundaries, boundary_tolerance)
             conc = _anchor_concentration(state.anchor_indices, gt_boundaries, boundary_tolerance)

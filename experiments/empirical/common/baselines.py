@@ -92,7 +92,7 @@ def anchor_feature_z2(
 ) -> Tuple[np.ndarray, List[int]]:
     """Z2 anchor feature: relaxed selector → hard projection → normalize → lift."""
     scores = sharp_event_score(sequence)
-    y_star = solve_relaxed_selector(scores, K, r, lam, solver="scipy")
+    y_star = solve_relaxed_selector(scores, K, r, lam, solver="osqp")
     indices = hard_projection(y_star, K, r)
     anchors = build_anchors(indices, sequence, scores)
     V = anchor_vectors(anchors)
@@ -115,7 +115,7 @@ def synapse_feature_z2(
 ) -> Tuple[np.ndarray, List[int], int]:
     """Z2 SYNAPSE feature: full pipeline with topology summary."""
     state = compute_memory(sequence, K=K, r=r, lam=lam, W_Theta=W_Theta, Q=Q,
-                           mu=mu, sigma=sigma, solver="scipy")
+                           mu=mu, sigma=sigma, solver="osqp")
     cloud = state.point_cloud.astype(np.float32) if state.point_cloud.size else np.zeros((0, k), dtype=np.float32)
     base = _pad_rows(cloud, K).reshape(-1)
     topo = summarize_diagrams(state.persistence_diagrams)
@@ -136,7 +136,7 @@ def relaxed_anchor_feature(
 ) -> Tuple[np.ndarray, List[int], int]:
     """Z2 relaxed readout: uses y* weights directly (training-time feature, §13)."""
     scores = sharp_event_score(sequence)
-    y_star = solve_relaxed_selector(scores, K, r, lam, solver="scipy")
+    y_star = solve_relaxed_selector(scores, K, r, lam, solver="osqp")
     # Weighted combination of all anchors (not just hard-projected subset)
     indices = [t for t in range(len(y_star)) if y_star[t] > 0.01]
     anchors = build_anchors(indices, sequence, scores)

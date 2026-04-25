@@ -55,7 +55,7 @@ def _extract_all_features(
     traj_f64 = trajectory.astype(np.float64)
     state = compute_memory(
         traj_f64, K=K, r=r, lam=lam,
-        W_Theta=W_Theta, Q=Q, solver="scipy",
+        W_Theta=W_Theta, Q=Q, solver="osqp",
     )
     cloud = state.point_cloud
     cloud_feat = cloud_geometry_summary(cloud)

@@ -64,7 +64,7 @@ def _extract_feature(sample, baseline, K, r, lam, k, Q, W_Theta, state_cache):
     elif baseline in {"B4", "B5", "B6", "B7"}:
         if cache_key not in state_cache:
             state_cache[cache_key] = compute_memory(
-                seq, K=K, r=r, lam=lam, W_Theta=W_Theta, Q=Q, solver="scipy",
+                seq, K=K, r=r, lam=lam, W_Theta=W_Theta, Q=Q, solver="osqp",
             )
         state = state_cache[cache_key]
         cloud = state.point_cloud.astype(np.float32) if state.point_cloud.size else np.zeros((0, k), dtype=np.float32)

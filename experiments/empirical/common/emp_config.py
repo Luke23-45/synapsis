@@ -120,7 +120,7 @@ def load_emp_config(
             num_seeds=3, seeds=[42, 123, 456],
         )
     if not hasattr(cfg, "memory"):
-        cfg.memory = SimpleNamespace(K=10, r=2, lam=1.0, k=8, Q=1, solver="scipy")
+        cfg.memory = SimpleNamespace(K=10, r=2, lam=1.0, k=8, Q=1, solver="osqp")
     if not hasattr(cfg, "trajectory"):
         cfg.trajectory = SimpleNamespace(d=5, T=100)
     if not hasattr(cfg, "data"):

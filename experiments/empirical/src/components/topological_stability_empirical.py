@@ -183,8 +183,8 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         W_Theta = make_orthogonal_W(k, D_dim, rng)
         traj_pert = traj + rng.standard_normal(traj.shape) * eps
 
-        state_o = compute_memory(traj, K, r, lam, W_Theta, Q_cfg, solver="scipy")
-        state_p = compute_memory(traj_pert, K, r, lam, W_Theta, Q_cfg, solver="scipy")
+        state_o = compute_memory(traj, K, r, lam, W_Theta, Q_cfg, solver="osqp")
+        state_p = compute_memory(traj_pert, K, r, lam, W_Theta, Q_cfg, solver="osqp")
 
         if (state_o.point_cloud.size > 0
                 and state_p.point_cloud.size > 0

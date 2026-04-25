@@ -150,7 +150,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
                 scores = sharp_event_score(noisy_traj)
 
                 # Z2 method
-                y_star = solve_relaxed_selector(scores, default_K, default_r, default_lam, solver="scipy")
+                y_star = solve_relaxed_selector(scores, default_K, default_r, default_lam, solver="osqp")
                 I_star = hard_projection(y_star, default_K, default_r)
                 z2_f1s.append(match_f1(I_star, gt_events, tolerance))
 
@@ -192,7 +192,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
             traj, gt_events = _generate_event_sparse(d, T, default_K, default_r, rng)
             traj = traj + rng.standard_normal(traj.shape) * 0.1
             scores = sharp_event_score(traj)
-            y_star = solve_relaxed_selector(scores, default_K, default_r, lam_val, solver="scipy")
+            y_star = solve_relaxed_selector(scores, default_K, default_r, lam_val, solver="osqp")
             I_star = hard_projection(y_star, default_K, default_r)
             f1_list.append(match_f1(I_star, gt_events, tolerance))
         mean_f1 = float(np.mean(f1_list))
@@ -211,7 +211,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
                     d, T, default_K, r_val, rng, min_gap=min_gap,
                 )
                 scores = sharp_event_score(traj)
-                y_star = solve_relaxed_selector(scores, default_K, r_val, default_lam, solver="scipy")
+                y_star = solve_relaxed_selector(scores, default_K, r_val, default_lam, solver="osqp")
                 I_star = hard_projection(y_star, default_K, r_val)
                 f1_list.append(match_f1(I_star, gt_events, tolerance))
             results[f"C_r{r_val}_{spacing}_f1"] = float(np.mean(f1_list))

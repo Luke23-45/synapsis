@@ -106,7 +106,7 @@ def _run_pipeline(traj: np.ndarray, K: int, r: int, lam: float):
     """Score → saliency → selector → projection.  Returns (y*, I*)."""
     scores = sharp_event_score(traj)
     sal = normalize_saliency(scores, mode="identity")
-    y_star = solve_relaxed_selector(sal, K, r, lam, solver="scipy")
+    y_star = solve_relaxed_selector(sal, K, r, lam, solver="osqp")
     I_star = hard_projection(y_star, K, r)
     return y_star, I_star
 

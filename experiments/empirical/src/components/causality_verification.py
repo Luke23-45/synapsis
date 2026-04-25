@@ -90,9 +90,9 @@ def _test_component_causality(
     sal_o = normalize_saliency(scores_orig, mode="identity")
     sal_a = normalize_saliency(scores_alt, mode="identity")
 
-    y_p = solve_relaxed_selector(sal_p, K, r, lam, solver="scipy")
-    y_o = solve_relaxed_selector(sal_o, K, r, lam, solver="scipy")
-    y_a = solve_relaxed_selector(sal_a, K, r, lam, solver="scipy")
+    y_p = solve_relaxed_selector(sal_p, K, r, lam, solver="osqp")
+    y_o = solve_relaxed_selector(sal_o, K, r, lam, solver="osqp")
+    y_a = solve_relaxed_selector(sal_a, K, r, lam, solver="osqp")
 
     sel_ok = (
         np.allclose(y_p, y_o[:t_cut], atol=1e-6)
@@ -198,8 +198,8 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
             continue
         full_op_total += 1
 
-        state_prefix = compute_memory(traj[:t_cut], K, r, lam, W_Theta, Q, solver="scipy")
-        state_full = compute_memory(traj, K, r, lam, W_Theta, Q, solver="scipy")
+        state_prefix = compute_memory(traj[:t_cut], K, r, lam, W_Theta, Q, solver="osqp")
+        state_full = compute_memory(traj, K, r, lam, W_Theta, Q, solver="osqp")
 
         scores_match = np.array_equal(
             state_prefix.event_scores, state_full.event_scores[:t_cut],
@@ -246,8 +246,8 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         sala = normalize_saliency(sa, mode="identity")
         sal_ok = np.array_equal(salp, sala[:t_cut])
 
-        yp = solve_relaxed_selector(salp, K, r, lam, solver="scipy")
-        ya = solve_relaxed_selector(sala, K, r, lam, solver="scipy")
+        yp = solve_relaxed_selector(salp, K, r, lam, solver="osqp")
+        ya = solve_relaxed_selector(sala, K, r, lam, solver="osqp")
         sel_ok = np.allclose(yp, ya[:t_cut], atol=1e-6)
 
         if enc_ok and sal_ok and sel_ok:

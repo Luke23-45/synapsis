@@ -177,7 +177,7 @@ def test_compute_memory_handles_single_timestep_boundary_case():
         lam=0.5,
         W_Theta=_lift_matrix(dims=trajectory.shape[1], lift_dim=4),
         Q=1,
-        solver="scipy",
+        solver="osqp",
     )
 
     assert state.anchor_indices == []
@@ -195,12 +195,12 @@ def test_compute_memory_rejects_non_finite_inputs(bad_value: float):
     bad_trajectory = trajectory.copy()
     bad_trajectory[3, 1] = bad_value
     with pytest.raises(ValueError, match="trajectory must contain only finite values"):
-        compute_memory(bad_trajectory, K=3, r=1, lam=0.5, W_Theta=W_theta, Q=0, solver="scipy")
+        compute_memory(bad_trajectory, K=3, r=1, lam=0.5, W_Theta=W_theta, Q=0, solver="osqp")
 
     bad_W = W_theta.copy()
     bad_W[0, 0] = bad_value
     with pytest.raises(ValueError, match="W_Theta must contain only finite values"):
-        compute_memory(trajectory, K=3, r=1, lam=0.5, W_Theta=bad_W, Q=0, solver="scipy")
+        compute_memory(trajectory, K=3, r=1, lam=0.5, W_Theta=bad_W, Q=0, solver="osqp")
 
 
 def test_solver_failure_propagates_runtime_error(monkeypatch: pytest.MonkeyPatch):
@@ -228,7 +228,7 @@ def test_compute_memory_respects_budget_under_extreme_refractory():
         lam=1e-4,
         W_Theta=_lift_matrix(dims=trajectory.shape[1], lift_dim=6),
         Q=0,
-        solver="scipy",
+        solver="osqp",
     )
 
     assert len(state.anchor_indices) <= 1

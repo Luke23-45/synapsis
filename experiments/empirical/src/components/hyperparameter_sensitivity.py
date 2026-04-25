@@ -60,7 +60,7 @@ def _evaluate_recovery(
 ) -> Dict[str, float]:
     """Run the full Z2 selector pipeline and compute F1 + structural metrics."""
     scores = sharp_event_score(traj)
-    y_star = solve_relaxed_selector(scores, K, r, lam, solver="scipy")
+    y_star = solve_relaxed_selector(scores, K, r, lam, solver="osqp")
     detected = hard_projection(y_star, K, r)
 
     f1 = match_f1(detected, gt_events, tolerance)
@@ -91,7 +91,7 @@ def _ridge_probe_from_memory(
     labels: List[int] = []
 
     for traj, label in trajs_labels:
-        state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="scipy")
+        state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="osqp")
         cloud_flat = state.point_cloud.flatten().astype(np.float32)
         topo = summarize_diagrams(state.persistence_diagrams)
         feat = np.concatenate([cloud_flat[:K * k], topo])

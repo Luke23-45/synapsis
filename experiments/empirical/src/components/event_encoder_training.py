@@ -209,7 +209,7 @@ def _evaluate_event_detection(
             f1_scores.append(1.0)
             continue
         scores_f64 = scores.astype(np.float64)
-        y_star = solve_relaxed_selector(scores_f64, K, r, lam, solver="scipy")
+        y_star = solve_relaxed_selector(scores_f64, K, r, lam, solver="osqp")
         detected = hard_projection(y_star, K, r)
         f1 = match_f1(detected, sample["change_points"], tolerance)
         f1_scores.append(f1)
