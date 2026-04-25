@@ -231,34 +231,26 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         action_chunk_size=chunk_size, hidden_dim=hidden_dim,
         d_model=d_model, num_heads=num_heads, num_layers=num_layers,
         ffn_ratio=ffn_ratio, dropout=dropout,
-        K=K, r=r, lam=lam, Q=Q, k=k, max_history_tokens=K,
+        K=K, r=r, lam=lam, Q=Q, k=k, max_history_tokens=T,
     )
 
     lit_model = SynapseLitModule(arch_config, lr=lr)
     callbacks = [
         pl.callbacks.EarlyStopping(monitor="val/loss", patience=patience, mode="min"),
-        pl.callbacks.ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
-        pl.callbacks.TQDMProgressBar(refresh_rate=10, leave=False),
     ]
 
     trainer = pl.Trainer(
         max_epochs=epochs,
         callbacks=callbacks,
         gradient_clip_val=1.0,
-        enable_progress_bar=True,
+        enable_progress_bar=False,
         enable_model_summary=False,
         logger=False,
+        enable_checkpointing=False,
         **device_cfg,
     )
     trainer.fit(lit_model, train_loader, val_loader)
 
-    # Load best checkpoint
-    if trainer.checkpoint_callback.best_model_path:
-        best = SynapseLitModule.load_from_checkpoint(
-            trainer.checkpoint_callback.best_model_path,
-            arch_config=arch_config,
-        )
-        lit_model.load_state_dict(best.state_dict())
 
     # Evaluate both paths (on CPU for deploy compatibility)
     model = lit_model.model

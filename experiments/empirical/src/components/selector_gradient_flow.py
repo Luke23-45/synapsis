@@ -178,7 +178,6 @@ def _train_and_test(
     lit = SelectorProbeLitModule(model, lr=lr)
     callbacks = [
         pl.callbacks.EarlyStopping(monitor="val/loss", patience=patience, mode="min"),
-        pl.callbacks.ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
     ]
     trainer = pl.Trainer(
         max_epochs=epochs,
@@ -186,10 +185,11 @@ def _train_and_test(
         enable_progress_bar=False,
         enable_model_summary=False,
         logger=False,
+        enable_checkpointing=False,
         **device_cfg,
     )
     trainer.fit(lit, train_loader, val_loader)
-    results = trainer.test(lit, test_loader, ckpt_path="best", verbose=False)
+    results = trainer.test(lit, test_loader, verbose=False)
     return results[0].get("test/acc", 0.0) if results else 0.0
 
 

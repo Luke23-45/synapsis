@@ -178,24 +178,17 @@ def _train_with_lightning(
     """Train a Lightning module with early stopping and best-checkpoint."""
     callbacks = [
         pl.callbacks.EarlyStopping(monitor="val/loss", patience=patience, mode="min"),
-        pl.callbacks.ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
-        pl.callbacks.TQDMProgressBar(refresh_rate=10, leave=False),
     ]
     trainer = pl.Trainer(
         max_epochs=max_epochs,
         callbacks=callbacks,
-        enable_progress_bar=True,
+        enable_progress_bar=False,
         enable_model_summary=False,
         logger=False,  # no disk logging for sub-experiments
+        enable_checkpointing=False,
         **device_cfg,
     )
     trainer.fit(lit_model, train_loader, val_loader)
-    # Load best checkpoint weights
-    if trainer.checkpoint_callback.best_model_path:
-        best = type(lit_model).load_from_checkpoint(
-            trainer.checkpoint_callback.best_model_path,
-        )
-        lit_model.load_state_dict(best.state_dict())
     return lit_model
 
 
