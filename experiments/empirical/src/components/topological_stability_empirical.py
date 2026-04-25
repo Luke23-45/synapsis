@@ -159,7 +159,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     results["A_pass_rate"] = 1.0 - violations / max(total_tests, 1)
     results["A_max_violation_ratio"] = max_ratio
 
-    save_experiment_npz("EMP-11", seed, {"test_clouds": np.stack([c for c in clouds]) if clouds else np.zeros(0)}, cfg.output_dir)
+    save_experiment_npz("EMP-11", seed, {"test_clouds": np.array(clouds, dtype=object) if clouds else np.zeros(0)}, cfg.output_dir)
 
     for eps in epsilon_values:
         ratios = per_eps[f"eps_{eps}"]
