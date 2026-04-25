@@ -70,7 +70,8 @@ def _contrastive_loss(
     if not valid_mask.any():
         return torch.tensor(0.0, device=centroids.device, requires_grad=True)
     exp_sim = torch.exp(sim)
-    exp_sim.fill_diagonal_(0)
+    mask = torch.ones_like(exp_sim) - torch.eye(B, device=exp_sim.device)
+    exp_sim = exp_sim * mask
     pos_sum = (exp_sim * label_eq).sum(dim=1)
     all_sum = exp_sim.sum(dim=1)
     loss = -torch.log(pos_sum / all_sum.clamp_min(1e-8) + 1e-8)
@@ -225,20 +226,14 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
 
     callbacks = [
         pl.callbacks.EarlyStopping(monitor="val/loss", patience=patience, mode="min"),
-        pl.callbacks.ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
-        pl.callbacks.TQDMProgressBar(refresh_rate=10, leave=False),
     ]
     trainer = pl.Trainer(
         max_epochs=epochs, callbacks=callbacks,
-        enable_progress_bar=True, enable_model_summary=False, logger=False,
+        enable_progress_bar=False, enable_model_summary=False, logger=False,
+        enable_checkpointing=False,
         **device_cfg,
     )
     trainer.fit(lit_trained, train_loader, val_loader)
-    if trainer.checkpoint_callback.best_model_path:
-        best = ContrastiveLiftLitModule.load_from_checkpoint(
-            trainer.checkpoint_callback.best_model_path,
-        )
-        lit_trained.load_state_dict(best.state_dict())
 
     # Evaluate LIFT-TRAINED
     lit_trained.eval().cpu()
@@ -308,18 +303,12 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     trainer2 = pl.Trainer(
         max_epochs=epochs, callbacks=[
             pl.callbacks.EarlyStopping(monitor="val/loss", patience=patience, mode="min"),
-            pl.callbacks.ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
-            pl.callbacks.TQDMProgressBar(refresh_rate=10, leave=False),
         ],
-        enable_progress_bar=True, enable_model_summary=False, logger=False,
+        enable_progress_bar=False, enable_model_summary=False, logger=False,
+        enable_checkpointing=False,
         **device_cfg,
     )
     trainer2.fit(lit_no_norm, train_loader, val_loader)
-    if trainer2.checkpoint_callback.best_model_path:
-        best_nn = ContrastiveLiftLitModule.load_from_checkpoint(
-            trainer2.checkpoint_callback.best_model_path,
-        )
-        lit_no_norm.load_state_dict(best_nn.state_dict())
 
     lit_no_norm.eval().cpu()
     with torch.no_grad():
