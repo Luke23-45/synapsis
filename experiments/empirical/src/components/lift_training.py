@@ -226,10 +226,11 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     callbacks = [
         pl.callbacks.EarlyStopping(monitor="val/loss", patience=patience, mode="min"),
         pl.callbacks.ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
+        pl.callbacks.TQDMProgressBar(refresh_rate=10, leave=False),
     ]
     trainer = pl.Trainer(
         max_epochs=epochs, callbacks=callbacks,
-        enable_progress_bar=False, enable_model_summary=False, logger=False,
+        enable_progress_bar=True, enable_model_summary=False, logger=False,
         **device_cfg,
     )
     trainer.fit(lit_trained, train_loader, val_loader)
@@ -308,8 +309,9 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         max_epochs=epochs, callbacks=[
             pl.callbacks.EarlyStopping(monitor="val/loss", patience=patience, mode="min"),
             pl.callbacks.ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
+            pl.callbacks.TQDMProgressBar(refresh_rate=10, leave=False),
         ],
-        enable_progress_bar=False, enable_model_summary=False, logger=False,
+        enable_progress_bar=True, enable_model_summary=False, logger=False,
         **device_cfg,
     )
     trainer2.fit(lit_no_norm, train_loader, val_loader)

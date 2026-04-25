@@ -238,13 +238,14 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     callbacks = [
         pl.callbacks.EarlyStopping(monitor="val/loss", patience=patience, mode="min"),
         pl.callbacks.ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
+        pl.callbacks.TQDMProgressBar(refresh_rate=10, leave=False),
     ]
 
     trainer = pl.Trainer(
         max_epochs=epochs,
         callbacks=callbacks,
         gradient_clip_val=1.0,
-        enable_progress_bar=False,
+        enable_progress_bar=True,
         enable_model_summary=False,
         logger=False,
         **device_cfg,
