@@ -68,6 +68,19 @@ def generate_event_detection_dataset(
     return samples
 
 
+# ── Custom Weighted Loss ───────────────────────────────────────────────────
+
+class WeightedMSELoss(nn.Module):
+    """MSE Loss with higher weight for positive (event) samples."""
+    def __init__(self, pos_weight: float = 20.0):
+        super().__init__()
+        self.pos_weight = pos_weight
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        weight = torch.where(target > 0.5, self.pos_weight, 1.0)
+        return torch.mean(weight * (pred - target) ** 2)
+
+
 # ── Lightning Module for Event Encoder ─────────────────────────────────────
 
 class EventEncoderLitModule(pl.LightningModule):
@@ -77,7 +90,7 @@ class EventEncoderLitModule(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.encoder = EventEncoder(input_dim, hidden_dim)
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = WeightedMSELoss(pos_weight=20.0)
         self.lr = lr
 
     def forward(self, x: torch.Tensor):
@@ -129,7 +142,7 @@ class Conv1DLitModule(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.detector = Conv1DDetector(input_dim)
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = WeightedMSELoss(pos_weight=20.0)
         self.lr = lr
 
     def forward(self, x):
