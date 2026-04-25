@@ -503,11 +503,13 @@ def _solve_osqp(
                verbose=False, eps_abs=1e-9, eps_rel=1e-9, max_iter=10000)
     res = prob.solve()
 
-    if res.info.status_val not in (1,):  # 1 = solved
-        raise RuntimeError(
+    if res.info.status_val not in (1, 2):  # 1 = solved, 2 = solved inaccurate
+        warnings.warn(
             f"OSQP solver failed with status: {res.info.status}. "
-            f"Falling back to scipy may help."
+            f"Falling back to scipy.",
+            RuntimeWarning
         )
+        return _solve_scipy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
 
     return res.x.astype(np.float64)
 
