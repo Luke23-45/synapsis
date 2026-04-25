@@ -1,52 +1,97 @@
-# SYNAPSE Empirical Experiments Configuration
-# =============================================
-# Config for the broader paper-claim experiments.
-# These experiments validate that SYNAPSE's memory operator
-# provides measurable downstream utility beyond baselines.
+# SYNAPSE Z2 Empirical Experiment Configuration
+# Source of truth: docs/formal_math/z2/
 
-# --- Memory operator parameters ---
-memory:
-  K: 10
-  r: 2
-  tau: 0.5
-  Q: 1
-  weights: [1.0, 1.0, 1.0, 1.0]
+memory_operator:
+  selector:
+    K: 10
+    r: 2
+    lam: 1.0
+    solver: "osqp"
+  normalization:
+    fit_from_data: true
+  lift:
+    k: 8
+    init: "orthogonal"
+  topology:
+    Q: 1
+  saliency:
+    mode: "identity"
+    temperature: 1.0
+  training_readout:
+    enabled: false
+    mode: "dense_soft_tokens"
+    separate_training_head: true
 
-# --- Synthetic task generation ---
+encoder:
+  mode: "sharp"
+  alpha: 0.0
+
+trajectory:
+  d: 5
+  T: 100
+  seed: 42
+
+execution:
+  num_replications: 50
+  seed: 42
+  verbose: false
+  strict: false
+
+plotting:
+  theme: "publication"
+  formats: ["png", "pdf"]
+  dpi: 600
+
+output_dir: "experiments/outputs"
+log_dir: "experiments/outputs/logs"
+
+# Per-experiment overrides
+experiments:
+  ez2_01_anchor_phase_alignment:
+    K_values: [5, 10]
+    r_values: [1, 2]
+    lam_values: [0.1, 1.0, 5.0]
+    k_values: [8]
+    normalization_modes: ["fit_from_data"]
+    boundary_tolerance: 3
+
+  ez2_02_topology_structure:
+    k_values: [4, 8]
+    Q_values: [0, 1]
+    noise_std: 0.05
+
+  ez2_03_event_sparse_recovery:
+    noise_levels: [0.05, 0.3]
+    distractor_levels: [0.2, 1.2]
+    lambda_values: [0.1, 1.0, 5.0]
+    r_values: [1, 2]
+    K_values: [10]
+    event_recovery_trials: 15
+    tolerance: 2
+
+  ez2_04_memory_sufficiency:
+    task_families:
+      - delayed_retrieval
+      - ordered_trigger_response
+      - phase_conditioned_decision
+    K_values: [10]
+    lam_values: [0.1, 1.0]
+    k_values: [8]
+    num_seeds: 2
+
+# Empirical infrastructure
 synthetic_tasks:
   seq_len: 100
   state_dim: 8
   train_samples: 200
   val_samples: 50
   test_samples: 100
-  event_recovery_trials: 30
-  noise_levels: [0.05, 0.15, 0.3]
-  distractor_levels: [0.2, 0.6, 1.2]
-  task_families:
-    - delayed_retrieval
-    - ordered_trigger_response
-    - phase_conditioned_decision
-    - revisit_dependent_rule_switching
-  topology_train_samples: 200
-  topology_test_samples: 80
 
-# --- Baseline configurations ---
 baselines:
-  families: ["B0", "B1", "B2", "B3", "B4", "B5", "B6"]
+  families: ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7"]
   window_size: 20
   hidden_dim: 64
 
-  # Human-readable name mapping
-  labels:
-    B0: "FixedWindow"
-    B1: "GRU"
-    B2: "Transformer"
-    B3: "UniformSample"
-    B4: "AnchorOnly"
-    B5: "Anchor+Proxy"
-    B6: "SYNAPSE"
-
-# --- Training ---
 training:
   batch_size: 32
   learning_rate: 0.001
@@ -55,54 +100,9 @@ training:
   num_seeds: 3
   device: "cpu"
 
-# --- Public benchmark ---
-public_benchmark:
-  dataset_path: ""
-  smoke_use_synthetic_fallback: true
-  seq_len: 80
-
-# --- In-house pilot ---
-inhouse_pilot:
-  export_root: ""
-  index_json: ""
-  min_episode_length: 20
-
-# --- Applied robotics data ---
-applied_data:
-  export_root: "applied/robotics/output_data/exports"
-  index_json: "applied/robotics/output_data/raw/final_training_set/training_set_index.json"
-  smoke_max_episodes: 2
-  min_episode_length: 20
-  # Perturbation parameters for stability experiment
-  noise_sigmas: [0.001, 0.005, 0.01, 0.05]
-  drop_probs: [0.05, 0.1, 0.2]
-  truncation_fractions: [0.8, 0.6, 0.4]
-  # Anchor alignment tolerance (timesteps)
-  boundary_tolerance: 3
-
-# --- Stress tests ---
-stress_tests:
-  memory_budgets: [3, 5, 10, 20]
-  corruption_sigmas: [0.0, 0.1, 0.3, 0.5]
-
-# --- Acceptance gates ---
 acceptance_gates:
-  pc01_f1_margin: 0.02
-  pc02_accuracy_margin: 0.02
-  pc03_topology_gain: 0.01
-  pc04_frontier_margin: 0.0
-  pc05_relative_gain: 0.05
-  pc06_min_drop: 0.005
-  # Applied-data gates
-  applied_boundary_hit_rate: 0.3
-  applied_compression_coverage: 0.4
-  applied_stability_jaccard: 0.5
-
-# --- Output ---
-output_dir: experiments/outputs
-
-# --- Plotting ---
-plotting:
-  theme: publication
-  formats: [png, pdf]
-  dpi: 600
+  ez01_boundary_hit_rate: 0.3
+  ez01_compression_coverage: 0.4
+  ez02_topology_gain: 0.01
+  ez03_f1_margin: 0.02
+  ez04_accuracy_margin: 0.02

@@ -1,32 +1,29 @@
 """
-Baseline feature extraction and lightweight model definitions.
+Baseline feature extraction and lightweight model definitions — Z2 version.
+
+Z2 Reference: §5–9, §11, §13 of 02_rigorous_architecture.md
+Replaces Z1 anchor_feature/synapse_feature (tau, weights) with Z2 pipeline
+(relaxed selector → hard projection → normalize → lift).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import torch
 from torch import nn
+from scipy.spatial.distance import cdist
 
-from synapse_core.anchor_selector import Anchor, select_anchors
+from synapse_core.anchor_selector import Anchor, solve_relaxed_selector, hard_projection, build_anchors
 from synapse_core.event_encoder import sharp_event_score
-from synapse_core.geometric_lift import lift_anchors
-from synapse_core.memory_operator import M
+from synapse_core.geometric_lift import anchor_vectors, normalize_anchors, apply_lift
+from synapse_core.memory_operator import compute_memory
+from experiments.empirical.common.math_utils import pad_rows as _pad_rows
 
 
-def _pad_rows(arr: np.ndarray, rows: int) -> np.ndarray:
-    if arr.ndim == 1:
-        arr = arr[:, None]
-    if arr.size == 0:
-        cols = arr.shape[1] if arr.ndim == 2 else 1
-        return np.zeros((rows, cols), dtype=np.float32)
-    if arr.shape[0] >= rows:
-        return arr[:rows].astype(np.float32)
-    pad = np.zeros((rows - arr.shape[0], arr.shape[1]), dtype=np.float32)
-    return np.concatenate([arr.astype(np.float32), pad], axis=0)
+# _pad_rows imported from experiments.empirical.common.math_utils
 
 
 def summarize_diagrams(diagrams: List) -> np.ndarray:
@@ -48,14 +45,16 @@ def summarize_diagrams(diagrams: List) -> np.ndarray:
 
 
 def proxy_topology_features(sequence: np.ndarray, k: int) -> np.ndarray:
+    """Proxy features approximating topological summaries via cdist."""
     if len(sequence) == 0:
         return np.zeros(8, dtype=np.float32)
     sample = sequence[np.linspace(0, len(sequence) - 1, num=min(k, len(sequence)), dtype=int)]
     if len(sample) < 2:
         return np.zeros(8, dtype=np.float32)
-    dists = np.linalg.norm(sample[:, None, :] - sample[None, :, :], axis=-1)
+    # Use cdist (C-optimised) instead of O(n²) numpy broadcast
+    dists = cdist(sample, sample, metric="euclidean")
     tri = dists[np.triu_indices_from(dists, k=1)]
-    velocity = np.linalg.norm(np.diff(sequence, axis=0), axis=1) if len(sequence) > 1 else np.zeros(1, dtype=np.float32)
+    velocity = np.linalg.norm(np.diff(sample, axis=0), axis=1) if len(sample) > 1 else np.zeros(1, dtype=np.float32)
     return np.asarray(
         [
             float(tri.mean()) if len(tri) else 0.0,
@@ -78,40 +77,84 @@ def uniform_feature(sequence: np.ndarray, k: int) -> np.ndarray:
     return _pad_rows(sequence[idx], k).reshape(-1)
 
 
-def anchor_feature(sequence: np.ndarray, k: int, r: int, tau: float, weights: Tuple[float, float, float, float]) -> Tuple[np.ndarray, List[int]]:
-    scores = sharp_event_score(sequence)
-    indices, anchors = select_anchors(scores, sequence, k, r, tau)
-    cloud = lift_anchors(anchors, weights)
-    cloud = cloud.astype(np.float32) if cloud.size else np.zeros((0, sequence.shape[1] + 3), dtype=np.float32)
-    return _pad_rows(cloud, k).reshape(-1), indices
+# =======================================================================
+# Z2 Feature Extraction Functions
+# =======================================================================
 
-
-def delta_anchor_feature(sequence: np.ndarray, k: int, r: int, tau: float, weights: Tuple[float, float, float, float]) -> Tuple[np.ndarray, List[int]]:
-    diffs = np.zeros(len(sequence), dtype=np.float32)
-    if len(sequence) > 1:
-        diffs[1:] = np.linalg.norm(np.diff(sequence, axis=0), axis=1)
-    indices, anchors = select_anchors(diffs, sequence, k, r, tau)
-    cloud = lift_anchors(anchors, weights)
-    cloud = cloud.astype(np.float32) if cloud.size else np.zeros((0, sequence.shape[1] + 3), dtype=np.float32)
-    return _pad_rows(cloud, k).reshape(-1), indices
-
-
-def synapse_feature(
+def anchor_feature_z2(
     sequence: np.ndarray,
-    k: int,
+    K: int,
     r: int,
-    tau: float,
-    q: int,
-    weights: Tuple[float, float, float, float],
+    lam: float,
+    W_Theta: np.ndarray,
+    mu: Optional[np.ndarray] = None,
+    sigma: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, List[int]]:
+    """Z2 anchor feature: relaxed selector → hard projection → normalize → lift."""
+    scores = sharp_event_score(sequence)
+    y_star = solve_relaxed_selector(scores, K, r, lam, solver="scipy")
+    indices = hard_projection(y_star, K, r)
+    anchors = build_anchors(indices, sequence, scores)
+    V = anchor_vectors(anchors)
+    V_norm, _, _ = normalize_anchors(V, mu=mu, sigma=sigma)
+    cloud = apply_lift(V_norm, W_Theta)
+    cloud = cloud.astype(np.float32) if cloud.size else np.zeros((0, W_Theta.shape[0]), dtype=np.float32)
+    return _pad_rows(cloud, K).reshape(-1), indices
+
+
+def synapse_feature_z2(
+    sequence: np.ndarray,
+    K: int,
+    r: int,
+    lam: float,
+    k: int,
+    Q: int,
+    W_Theta: np.ndarray,
+    mu: Optional[np.ndarray] = None,
+    sigma: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, List[int], int]:
-    state = M(sequence, K=k, r=r, tau=tau, weights=weights, Q=q)
-    cloud = state.point_cloud.astype(np.float32) if state.point_cloud.size else np.zeros((0, sequence.shape[1] + 3), dtype=np.float32)
-    base = _pad_rows(cloud, k).reshape(-1)
+    """Z2 SYNAPSE feature: full pipeline with topology summary."""
+    state = compute_memory(sequence, K=K, r=r, lam=lam, W_Theta=W_Theta, Q=Q,
+                           mu=mu, sigma=sigma, solver="scipy")
+    cloud = state.point_cloud.astype(np.float32) if state.point_cloud.size else np.zeros((0, k), dtype=np.float32)
+    base = _pad_rows(cloud, K).reshape(-1)
     topo = summarize_diagrams(state.persistence_diagrams)
     feature = np.concatenate([base, topo], axis=0).astype(np.float32)
     memory_size = int(cloud.size + topo.size)
     return feature, state.anchor_indices, memory_size
 
+
+def relaxed_anchor_feature(
+    sequence: np.ndarray,
+    K: int,
+    r: int,
+    lam: float,
+    k: int,
+    W_Theta: np.ndarray,
+    mu: Optional[np.ndarray] = None,
+    sigma: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, List[int], int]:
+    """Z2 relaxed readout: uses y* weights directly (training-time feature, §13)."""
+    scores = sharp_event_score(sequence)
+    y_star = solve_relaxed_selector(scores, K, r, lam, solver="scipy")
+    # Weighted combination of all anchors (not just hard-projected subset)
+    indices = [t for t in range(len(y_star)) if y_star[t] > 0.01]
+    anchors = build_anchors(indices, sequence, scores)
+    V = anchor_vectors(anchors)
+    V_norm, _, _ = normalize_anchors(V, mu=mu, sigma=sigma)
+    cloud = apply_lift(V_norm, W_Theta)
+    # Weight each lifted point by its y* value
+    weights = y_star[indices]
+    weighted_cloud = cloud * weights[:, None]
+    cloud_out = weighted_cloud.astype(np.float32) if weighted_cloud.size else np.zeros((0, k), dtype=np.float32)
+    base = _pad_rows(cloud_out, K).reshape(-1)
+    memory_size = int(cloud_out.size)
+    return base, indices, memory_size
+
+
+# =======================================================================
+# Model Heads (reusable from Z1)
+# =======================================================================
 
 class MLPHead(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout: float = 0.1):
@@ -162,11 +205,10 @@ class TransformerHead(nn.Module):
 
 
 def build_baseline(name: str, input_dim: int, output_dim: int, hidden_dim: int, max_len: int = 512) -> nn.Module:
-    if name in {"B0", "B3", "B4", "B5", "B6"}:
+    if name in {"B0", "B3", "B4", "B5", "B6", "B7"}:
         return MLPHead(input_dim, hidden_dim, output_dim)
     if name == "B1":
         return GRUHead(input_dim, hidden_dim, output_dim)
     if name == "B2":
         return TransformerHead(input_dim, hidden_dim, output_dim, max_len=max_len)
     raise KeyError(f"Unknown baseline: {name}")
-

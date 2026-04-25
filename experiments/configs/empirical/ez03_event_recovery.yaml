@@ -1,0 +1,33 @@
+# EZ2-03: Event Sparse Recovery
+# Z2 Reference: §5–6 of 02_rigorous_architecture.md
+#
+# Tests that Z2 anchor selection recovers salient events more robustly
+# than naive schemes under noise and distractor variation.
+
+experiment:
+  id: "EZ2-03"
+  name: "Event Sparse Recovery"
+  formal_reference: "§5–6 of 02_rigorous_architecture.md"
+
+# ── Sweep ranges ─────────────────────────────────────────────────────────
+sweep:
+  noise_levels: [0.05, 0.15, 0.3]
+  distractor_levels: [0.2, 0.6, 1.2]
+  lambda_values: [0.01, 0.1, 0.5, 1.0, 5.0, 10.0]
+  r_values: [0, 1, 2, 5]
+  K_values: [5, 10]
+
+# ── Data ─────────────────────────────────────────────────────────────────
+data:
+  n_trials: 30
+
+trajectory:
+  T: 100
+
+# ── Evaluation ───────────────────────────────────────────────────────────
+evaluation:
+  tolerance: 2
+
+# ── Acceptance gates ─────────────────────────────────────────────────────
+acceptance_gates:
+  f1_margin: 0.02       # Z2 must be within margin of best baseline

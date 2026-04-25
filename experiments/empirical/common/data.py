@@ -293,6 +293,131 @@ def load_applied_dataset(
     return dataset
 
 
+def load_applied_dataset_from_lmdb(
+    lmdb_path: str,
+    max_episodes: int = 0,
+) -> AppliedDataset:
+    """Load an AppliedDataset from an LMDB file (the SOTA SoA format).
+
+    This is the LMDB equivalent of ``load_applied_dataset``. It reads the
+    optimized on-disk format via ``ExpertTrajectoryDataset`` and converts
+    each episode into a ``RobotEpisode`` dataclass, producing the same
+    ``AppliedDataset`` object that the CSV pipeline yields.
+
+    Design:
+    - **Structural parity:** Every ``RobotEpisode`` field is populated from
+      the corresponding LMDB modality. Missing optional modalities (e.g.,
+      ``ee_vel``, ``object_pos``) are filled with zero arrays of the
+      correct shape, ensuring downstream code never encounters ``None``
+      or missing-key errors.
+    - **expert_states → state_names:** The pickled ``expert_states`` list
+      from LMDB is mapped to the ``expert_states`` field of RobotEpisode.
+    - **Index metadata enrichment:** Episode-level metadata (success, seed)
+      from the LMDB JSON index is injected into each RobotEpisode, matching
+      the enrichment that ``load_applied_dataset`` performs from the
+      training_set_index.json.
+    - **Error resilience:** Individual episode conversion failures are
+      logged and skipped, mirroring the CSV loader's robustness.
+
+    Parameters
+    ----------
+    lmdb_path : str
+        Path to the ``.lmdb`` file (must have a companion ``_index.json``).
+    max_episodes : int
+        If > 0, load at most this many episodes (smoke mode).
+
+    Returns
+    -------
+    AppliedDataset
+        With ``episodes`` as ``List[RobotEpisode]`` and ``index_metadata``
+        populated from the LMDB index.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the LMDB file does not exist.
+    ValueError
+        If required modalities are missing from the LMDB index.
+    """
+    from experiments.empirical.dataset.expert_dataset import StandaloneLMDBReader
+
+    path = Path(lmdb_path)
+    if not path.exists():
+        raise FileNotFoundError(f"LMDB dataset not found: {path}")
+
+    # Prefer StandaloneLMDBReader (no SYNAPSIS/cv2 dependency).
+    # Falls back to ExpertTrajectoryDataset if SYNAPSIS is available and
+    # the user needs full SOTA features (LRU cache, image decode, etc.).
+    try:
+        ds = StandaloneLMDBReader(lmdb_path=str(path))
+    except Exception:
+        from experiments.empirical.dataset.expert_dataset import ExpertTrajectoryDataset
+        log.info("StandaloneLMDBReader unavailable, falling back to ExpertTrajectoryDataset.")
+        ds = ExpertTrajectoryDataset(
+            demo_path=str(path),
+            observation_horizon=2,
+            action_horizon=1,
+        )
+
+    result = ds.to_applied_dataset(max_episodes=max_episodes)
+    raw_episodes = result["episodes"]
+    index_metadata = result.get("index_metadata", {})
+
+    # Convert raw dicts → RobotEpisode dataclass instances
+    episodes: List[RobotEpisode] = []
+    for ep_dict in raw_episodes:
+        try:
+            T = ep_dict["length"]
+            proprio = ep_dict["states"]                          # (T, proprio_dim)
+            actions = ep_dict["actions"]                        # (T, action_dim)
+            gt_phase = ep_dict["phase_labels"]                  # (T,)
+
+            # expert_states / state_names
+            expert_states: List[str] = ep_dict.get("state_names", [])
+            if not expert_states:
+                expert_states = [f"PHASE_{int(gt_phase[t])}" for t in range(T)]
+
+            # Optional modalities — zero-fill if absent
+            ee_pose = ep_dict.get("ee_pose", np.zeros((T, EE_POSE_DIM), dtype=np.float32))
+            ee_vel = ep_dict.get("ee_vel", np.zeros((T, EE_VEL_DIM), dtype=np.float32))
+            object_pos = ep_dict.get("object_pos", np.zeros((T, OBJECT_POS_DIM), dtype=np.float32))
+            is_grasped = ep_dict.get("is_grasped", np.zeros(T, dtype=np.float32))
+
+            episode = RobotEpisode(
+                episode_id=ep_dict.get("episode_id", "unknown"),
+                length=T,
+                proprio=proprio.astype(np.float32),
+                actions=actions.astype(np.float32),
+                ee_pose=ee_pose.astype(np.float32) if ee_pose is not None else np.zeros((T, EE_POSE_DIM), dtype=np.float32),
+                ee_vel=ee_vel.astype(np.float32) if ee_vel is not None else np.zeros((T, EE_VEL_DIM), dtype=np.float32),
+                object_pos=object_pos.astype(np.float32) if object_pos is not None else np.zeros((T, OBJECT_POS_DIM), dtype=np.float32),
+                expert_states=expert_states,
+                gt_phase=gt_phase.astype(np.int64),
+                is_grasped=is_grasped.astype(np.float32),
+                success=ep_dict.get("success", None),
+                metadata={
+                    k: ep_dict[k]
+                    for k in ("seed", "expert_target_pose", "delta_ee_pose", "gt_gripper")
+                    if k in ep_dict
+                },
+            )
+            episodes.append(episode)
+        except Exception as e:
+            ep_id = ep_dict.get("episode_id", "unknown")
+            log.error("Failed to convert LMDB episode %s to RobotEpisode: %s", ep_id, e)
+
+    # Explicitly close the LMDB environment to release the file handle
+    ds.close_env()
+
+    dataset = AppliedDataset(
+        episodes=episodes,
+        index_metadata=index_metadata,
+        export_root=str(path),
+    )
+    log.info("Loaded LMDB dataset: %s", dataset.summary())
+    return dataset
+
+
 # ---------------------------------------------------------------------------
 # Synthetic fallback (adapted from SyntheticNTHDataset in original data.py)
 # ---------------------------------------------------------------------------

@@ -62,8 +62,10 @@ logs/
 *.temp
 *.bak
 *.swp
-# applied
+applied
 docs
 outputs
 experiments/outputs
 # TASKS.md
+legacy
+applied_robotics

@@ -1,0 +1,13 @@
+# ─── EMP-09: Metric Structure Validation ────────────────────────────────────
+# Empirical verification of triangle inequality / metric axioms in lift space
+
+n_triples: 5000       # random triples sampled for triangle inequality
+n_pairs: 2000         # random pairs for symmetry check
+
+data:
+  n_samples: 100
+  noise_std: 0.2
+
+training:
+  metric_epochs: 30    # epochs for contrastive lift training
+  seeds: [42, 123, 456]

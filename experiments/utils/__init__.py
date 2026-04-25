@@ -3,7 +3,7 @@ Experiment utilities -- shared infrastructure adapted from GibbsQ.
 
 Modules
 -------
-config        : Typed dataclass config loaded from YAML.
+config        : Typed dataclass config loaded from YAML (Z2 schema).
 model_io      : Run capsule management and artifact I/O.
 run_artifacts : Standardized per-run path helpers.
 logging       : File-based per-run logging setup.
@@ -13,6 +13,8 @@ progress      : Terminal progress bars (tqdm wrapper).
 
 from experiments.utils.config import (
     load_config, validate, ExperimentConfig, get_experiment_overrides,
+    RelaxedSelectorConfig, NormalizationConfig, GeometricLiftConfig,
+    TopologyConfig, SaliencyConfig, TrainingReadoutConfig, MemoryOperatorConfig,
 )
 from experiments.utils.model_io import (
     create_run_capsule, RunCapsule, save_config_snapshot,

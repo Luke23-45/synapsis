@@ -1,0 +1,38 @@
+# EMP-01: Event Encoder Training Validation
+# Z2 Reference: §3–4 of 02_rigorous_architecture.md
+#
+# Trains the learned EventEncoder and compares against:
+#   - Sharp encoder (non-learned baseline)
+#   - Conv1D detector (neural baseline)
+#   - Diff-norm thresholding (trivial baseline)
+
+experiment:
+  id: "EMP-01"
+  name: "Event Encoder Training"
+  formal_reference: "§3–4 of 02_rigorous_architecture.md"
+
+# ── Model ────────────────────────────────────────────────────────────────
+model:
+  hidden_dim: 64
+
+# ── Data ─────────────────────────────────────────────────────────────────
+data:
+  n_train: 200
+  n_val: 50
+  n_test: 100
+  noise_std: 0.2
+
+# ── Training (override base) ────────────────────────────────────────────
+training:
+  full_epochs: 50
+  lr: 1.0e-3
+  batch_size: 32
+  patience: 10
+
+# ── Evaluation ───────────────────────────────────────────────────────────
+evaluation:
+  tolerance: 2              # F1 tolerance window (±2 timesteps)
+
+# ── Acceptance gates ─────────────────────────────────────────────────────
+acceptance_gates:
+  learned_vs_sharp_margin: 0.05   # learned_f1 > sharp_f1 + margin

@@ -1,0 +1,60 @@
+# ─── SYNAPSE Phase 2 Empirical Validation — Base Config ─────────────────────
+# Inherited by all EMP-* experiments. Per-experiment YAMLs override only
+# what they need.
+#
+# Source of truth: docs/implementation/phase2_empirical_validation/plan.md
+
+# ── Z2 Memory Operator ──────────────────────────────────────────────────────
+memory:
+  K: 10
+  r: 2
+  lam: 1.0
+  k: 8        # lift dimension
+  Q: 1        # max homology degree
+  solver: "scipy"   # "osqp" or "scipy" — scipy is safer for small T
+
+# ── Trajectory defaults ─────────────────────────────────────────────────────
+trajectory:
+  d: 5        # ambient dimension
+  T: 100      # default trajectory length
+
+# ── Training infrastructure ─────────────────────────────────────────────────
+training:
+  batch_size: 32
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  smoke_epochs: 5          # quick sanity check runs
+  full_epochs: 50          # production runs
+  patience: 10             # early stopping patience
+  num_seeds: 3
+  seeds: [42, 123, 456]
+
+# ── Hardware / Lightning ────────────────────────────────────────────────────
+hardware:
+  accelerator: "auto"      # "auto" | "gpu" | "cpu" — Lightning picks best
+  devices: 1
+  precision: 32             # 32 | 16 | "bf16-mixed"
+  num_workers: 0            # DataLoader workers (0 = main process)
+  pin_memory: true
+
+# ── Data generation ─────────────────────────────────────────────────────────
+data:
+  n_train: 200
+  n_val: 50
+  n_test: 100
+  noise_std: 0.2
+
+# ── Plotting ────────────────────────────────────────────────────────────────
+plotting:
+  theme: "publication"
+  formats: ["png", "pdf"]
+  dpi: 600
+
+# ── Output paths ────────────────────────────────────────────────────────────
+output_dir: "experiments/outputs/empirical"
+log_dir: "experiments/outputs/empirical/logs"
+
+# ── Acceptance gates (global defaults — experiments can tighten) ─────────
+acceptance_gates:
+  min_margin: 0.05          # minimum improvement over baseline
+  significance_alpha: 0.05  # p-value threshold for paired t-test

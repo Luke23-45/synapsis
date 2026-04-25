@@ -1,0 +1,11 @@
+# ─── EMP-10: Causality Verification ─────────────────────────────────────────
+# Validates Theorem 12.1 (full operator causality) and Prop 5.2 (selector causality)
+# Memory state at prefix x_{1:t} must be invariant to future data x_{t+1:T}
+
+sweep:
+  n_trials: 30
+  cut_fractions: [0.3, 0.5, 0.7, 0.9]
+  saliency_modes: ["identity", "z_score", "temperature"]
+
+training:
+  seeds: [42, 123, 456]

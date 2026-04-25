@@ -1,0 +1,37 @@
+# EMP-02: Selector Gradient Flow Validation
+# Z2 Reference: §5 of 02_rigorous_architecture.md, Remark 5.3
+#
+# Tests whether the relaxed QP selector improves downstream classification
+# compared to uniform, top-K, and softmax-attention weighting.
+
+experiment:
+  id: "EMP-02"
+  name: "Selector Gradient Flow"
+  formal_reference: "§5 of 02_rigorous_architecture.md"
+
+# ── Model ────────────────────────────────────────────────────────────────
+model:
+  hidden_dim: 64
+
+# ── Task families ────────────────────────────────────────────────────────
+task_families:
+  - delayed_retrieval
+  - ordered_trigger_response
+  - phase_conditioned_decision
+
+# ── Data ─────────────────────────────────────────────────────────────────
+data:
+  n_train: 150
+  n_val: 40
+  n_test: 80
+
+# ── Training ─────────────────────────────────────────────────────────────
+training:
+  full_epochs: 40
+  lr: 1.0e-3
+  batch_size: 32
+  patience: 10
+
+# ── Acceptance gates ─────────────────────────────────────────────────────
+acceptance_gates:
+  min_family_win_ratio: 0.67  # SEL-Z2 beats SEL-UNI on ≥2/3 families

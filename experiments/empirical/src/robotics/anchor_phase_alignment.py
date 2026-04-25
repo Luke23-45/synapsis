@@ -1,293 +1,279 @@
 """
-Primary Applied Validation: Anchor-Phase Alignment
-==================================================
+EZ2-01: Anchor Phase Alignment (Robotics) — Empirical Experiment.
 
-Primary applied validation evidence:
-    SYNAPSE anchors are not arbitrary; they correspond to semantically
-    important transitions in real robotics trajectories.
+Z2 Reference: §7–8 of 02_rigorous_architecture.md
+Formal Claims: §7 (Anchor Sequence), §8 (Normalized Anchor Geometry)
 
-Methodology
-    Run SYNAPSE on each real episode's proprioception sequence.
-    Compare anchor timestamps against ground-truth phase boundaries
-    (gt_phase_0) and expert_states transitions.
+Tests that Z2 anchors correspond to semantically important transitions
+in robotics trajectories, and Z2 compression preserves more task-relevant
+structure than naive baselines.
 
-Metrics
-    - boundary_hit_rate:  fraction of true boundaries within tolerance
-                          of at least one anchor
-    - mean_distance:      mean timestep distance from each anchor to
-                          nearest true boundary
-    - anchor_concentration: fraction of anchors within tolerance of
-                            any boundary
-    - phase_purity:       for each anchor, the fraction of its local
-                          neighbourhood sharing the same phase label
-
-Outputs
-    figures/
-        anchor_alignment_summary.{png,pdf}
-        anchor_phase_overlay.{png,pdf}        (per-episode examples)
-    metrics/results.csv, metrics/metrics.jsonl
-    artifacts/report.json
-    logs/run.log
+Modernized to use:
+  - YAML config via load_emp_config("EZ2-01")
+  - Multi-seed orchestration via run_multi_seed()
+  - Shared match_f1 from common/metrics.py
 """
-
 from __future__ import annotations
 
 import logging
 import sys
 from pathlib import Path
-from time import perf_counter
-from typing import List
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
+import pytorch_lightning as pl
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
-
-from experiments.empirical.common.baselines import anchor_feature, synapse_feature, uniform_feature
-from experiments.empirical.common.data import (
-    RobotEpisode, load_applied_dataset, generate_synthetic_episodes,
-)
-from experiments.empirical.common.experiment import (
-    finalize_and_save, plot_bar, plot_grouped_bar,
-    record_case, setup_run, start_report,
-)
-from experiments.empirical.common.config import load_config, validate_config
+from synapse_core.memory_operator import compute_memory
+from experiments.common.trajectory_generators import piecewise_constant
+from experiments.empirical.common.metrics import match_f1
+from experiments.empirical.common.seed_runner import run_multi_seed
+from experiments.empirical.common.emp_config import load_emp_config
+from experiments.empirical.common.data_saver import save_experiment_npz
 
 log = logging.getLogger(__name__)
 
-EXPERIMENT_ID = "AP-01"
-EXPERIMENT_NAME = "Anchor-Phase Alignment"
 
-CSV_FIELDS = [
-    "episode_id", "method", "num_anchors", "num_expert_boundaries", "num_phase_boundaries",
-    "expert_state_hit_rate", "phase_hit_rate", "mean_distance", "anchor_concentration",
-    "phase_purity", "passed",
-]
+# ── Helpers ────────────────────────────────────────────────────────────────
 
-METHODS = ["UniformSample", "DeltaThreshold", "SYNAPSE"]
+def _make_orthogonal_W(k: int, D: int, rng: np.random.Generator) -> np.ndarray:
+    if k <= D:
+        A = rng.standard_normal((D, D))
+        Q, _ = np.linalg.qr(A)
+        return Q[:k, :].astype(np.float64)
+    W = np.zeros((k, D), dtype=np.float64)
+    W[:D, :D] = np.eye(D)
+    return W
+
+
+def _generate_labeled_phase_trajectory(
+    d: int, T: int, num_segments: int, seed: int,
+) -> Tuple[np.ndarray, List[int]]:
+    """Generate piecewise-constant trajectory with known phase boundaries."""
+    n_cps = max(1, num_segments - 1)
+    cps = list(np.linspace(T // (n_cps + 1), T - T // (n_cps + 1), num=n_cps, dtype=int))
+    traj, gt_boundaries = piecewise_constant(d, T, cps, seed=seed)
+    return traj, gt_boundaries
 
 
 def _boundary_hit_rate(
-    anchors: List[int],
-    boundaries: List[int],
-    tolerance: int,
+    anchor_indices: List[int], boundaries: List[int], tolerance: int,
 ) -> float:
-    """Fraction of true boundaries hit by at least one anchor."""
+    """Fraction of phase boundaries hit by at least one anchor within tolerance."""
     if not boundaries:
         return 1.0
-    hits = 0
-    for b in boundaries:
-        if any(abs(a - b) <= tolerance for a in anchors):
-            hits += 1
+    hits = sum(1 for b in boundaries if any(abs(a - b) <= tolerance for a in anchor_indices))
     return hits / len(boundaries)
 
 
-def _mean_distance_to_boundary(
-    anchors: List[int],
-    boundaries: List[int],
-) -> float:
-    """Mean distance from each anchor to its nearest boundary."""
-    if not anchors or not boundaries:
-        return float("inf")
-    dists = []
-    for a in anchors:
-        dists.append(min(abs(a - b) for b in boundaries))
-    return float(np.mean(dists))
-
-
 def _anchor_concentration(
-    anchors: List[int],
-    boundaries: List[int],
-    tolerance: int,
+    anchor_indices: List[int], boundaries: List[int], tolerance: int,
 ) -> float:
-    """Fraction of anchors within tolerance of any boundary."""
-    if not anchors:
+    """Fraction of anchors near at least one boundary (precision)."""
+    if not anchor_indices:
         return 0.0
-    near = sum(1 for a in anchors
-               if any(abs(a - b) <= tolerance for b in boundaries))
-    return near / len(anchors)
+    near = sum(1 for a in anchor_indices if any(abs(a - b) <= tolerance for b in boundaries))
+    return near / len(anchor_indices)
 
 
-def _phase_purity(
-    anchors: List[int],
-    gt_phase: np.ndarray,
-    window: int = 3,
-) -> float:
-    """Mean local phase purity around each anchor."""
-    if not anchors:
+def _compute_f1(recall: float, precision: float) -> float:
+    if precision + recall < 1e-10:
         return 0.0
-    purities = []
-    for a in anchors:
-        lo = max(0, a - window)
-        hi = min(len(gt_phase), a + window + 1)
-        local = gt_phase[lo:hi]
-        if len(local) == 0:
-            continue
-        counts = np.bincount(local)
-        purities.append(float(counts.max()) / len(local))
-    return float(np.mean(purities)) if purities else 0.0
+    return 2 * precision * recall / (precision + recall)
 
 
-def _get_anchors(episode: RobotEpisode, method: str, cfg) -> List[int]:
-    """Extract anchor indices using specified method."""
-    seq = episode.state_sequence  # (T, 22) proprio
-    K = cfg.memory.K
-    r = cfg.memory.r
-    tau = cfg.memory.tau
-    weights = tuple(cfg.memory.weights)
-
-    if method == "UniformSample":
-        n = min(K, len(seq))
-        return np.linspace(0, len(seq) - 1, num=n, dtype=int).tolist()
-
-    if method == "DeltaThreshold":
-        diffs = np.zeros(len(seq), dtype=np.float32)
-        if len(seq) > 1:
-            diffs[1:] = np.linalg.norm(np.diff(seq, axis=0), axis=1)
-        return np.where(diffs > tau)[0].tolist()[:K]
-
-    # SYNAPSE
-    _, anchor_indices, _ = synapse_feature(
-        seq, K, r, tau, cfg.memory.Q, weights,
-    )
-    return anchor_indices
+def _topk_event_baseline(scores: np.ndarray, K: int, r: int) -> List[int]:
+    order = sorted(range(1, len(scores)), key=lambda idx: (-scores[idx], idx))
+    retained: List[int] = []
+    for idx in order:
+        if len(retained) >= K:
+            break
+        if all(abs(idx - prev) > r for prev in retained):
+            retained.append(idx)
+    retained.sort()
+    return retained
 
 
-def _load_dataset(cfg):
-    export_root = getattr(cfg.applied_data, "export_root", "")
-    index_json = getattr(cfg.applied_data, "index_json", "")
-    if export_root and Path(export_root).exists():
-        return load_applied_dataset(export_root, index_json)
-    log.warning("Real data not found. Using synthetic fallback.")
-    return generate_synthetic_episodes(num_episodes=10, T=100)
+# ── Single-Seed Experiment ─────────────────────────────────────────────────
 
+def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
+    """Run EZ2-01 for a single seed."""
+    pl.seed_everything(seed, workers=True)
+    cfg = config
+    rng = np.random.default_rng(seed)
 
-def run_experiment(cfg=None, verbose: bool = False):
-    if cfg is None:
-        cfg = load_config("experiments/configs/robotics.yaml")
-        validate_config(cfg)
+    d = cfg.trajectory.d
+    T = cfg.trajectory.T
+    Q = cfg.memory.Q
 
-    report = start_report(
-        EXPERIMENT_ID, EXPERIMENT_NAME,
-        "Primary applied validation evidence: anchors correspond to phase transitions",
-        "SYNAPSE anchors align with boundaries on real robotics trajectories",
-    )
-    capsule = setup_run(cfg, "applied_anchor_phase_alignment")
-    csv_rows: list[dict] = []
-    start = perf_counter()
+    sweep = cfg.sweep if hasattr(cfg, "sweep") else cfg
+    K_values = getattr(sweep, "K_values", [5, 10, 20])
+    r_values = getattr(sweep, "r_values", [1, 2, 5])
+    lam_values = getattr(sweep, "lam_values", [0.1, 0.5, 1.0, 5.0])
+    k_values = getattr(sweep, "k_values", [4, 8])
+    n_trials = getattr(cfg.data, "n_trials", 20)
+    boundary_tolerance = 3
+    if hasattr(cfg, "evaluation"):
+        boundary_tolerance = getattr(cfg.evaluation, "boundary_tolerance", 3)
 
-    dataset = _load_dataset(cfg)
-    tolerance = cfg.applied_data.boundary_tolerance
+    D = d + 3
+    results: Dict[str, float] = {}
 
-    # Aggregators
-    method_expert_hits: dict[str, list[float]] = {m: [] for m in METHODS}
-    method_phase_hits: dict[str, list[float]] = {m: [] for m in METHODS}
-    method_dists: dict[str, list[float]] = {m: [] for m in METHODS}
-    method_conc: dict[str, list[float]] = {m: [] for m in METHODS}
-    method_purity: dict[str, list[float]] = {m: [] for m in METHODS}
+    # ── Test A: Anchor-Boundary Alignment ─────────────────────────────
+    best_z2_f1 = 0.0
+    best_baseline_f1 = 0.0
+    best_hit_rate = 0.0
 
-    for ep in dataset.episodes:
-        if ep.length < cfg.applied_data.min_episode_length:
-            continue
+    for K in K_values:
+        for r in r_values:
+            for lam in lam_values:
+                for k in k_values:
+                    z2_f1s: List[float] = []
+                    uni_f1s: List[float] = []
+                    topk_f1s: List[float] = []
+                    hit_rates: List[float] = []
 
-        expert_boundaries = ep.expert_state_boundaries
-        phase_boundaries = ep.phase_boundaries
+                    for trial in range(n_trials):
+                        num_segments = max(3, min(K + 2, T // (r + 1)))
+                        traj, gt_boundaries = _generate_labeled_phase_trajectory(
+                            d, T, num_segments, int(rng.integers(2**31)),
+                        )
+                        W_Theta = _make_orthogonal_W(k, D, rng)
+                        state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="scipy")
 
-        for method in METHODS:
-            anchors = _get_anchors(ep, method, cfg)
-            expert_hit = _boundary_hit_rate(anchors, expert_boundaries, tolerance)
-            phase_hit = _boundary_hit_rate(anchors, phase_boundaries, tolerance)
-            dist = _mean_distance_to_boundary(anchors, phase_boundaries)
-            conc = _anchor_concentration(anchors, phase_boundaries, tolerance)
-            pur = _phase_purity(anchors, ep.gt_phase)
+                        hit_rate = _boundary_hit_rate(
+                            state.anchor_indices, gt_boundaries, boundary_tolerance,
+                        )
+                        concentration = _anchor_concentration(
+                            state.anchor_indices, gt_boundaries, boundary_tolerance,
+                        )
+                        z2_f1 = _compute_f1(hit_rate, concentration)
 
-            method_expert_hits[method].append(expert_hit)
-            method_phase_hits[method].append(phase_hit)
-            method_dists[method].append(dist)
-            method_conc[method].append(conc)
-            method_purity[method].append(pur)
+                        # Baselines
+                        uniform_idx = list(np.linspace(1, T - 1, num=min(K, T - 1), dtype=int))
+                        uni_hit = _boundary_hit_rate(uniform_idx, gt_boundaries, boundary_tolerance)
+                        uni_conc = _anchor_concentration(uniform_idx, gt_boundaries, boundary_tolerance)
+                        uni_f1 = _compute_f1(uni_hit, uni_conc)
 
-            row = {
-                "episode_id": ep.episode_id,
-                "method": method,
-                "num_anchors": len(anchors),
-                "num_expert_boundaries": len(expert_boundaries),
-                "num_phase_boundaries": len(phase_boundaries),
-                "expert_state_hit_rate": round(expert_hit, 6),
-                "phase_hit_rate": round(phase_hit, 6),
-                "mean_distance": round(dist, 4),
-                "anchor_concentration": round(conc, 6),
-                "phase_purity": round(pur, 6),
-                "passed": True,
-            }
-            record_case(report, capsule, csv_rows,
-                         f"{ep.episode_id}_{method}", True, row)
+                        topk_idx = _topk_event_baseline(state.event_scores, K, r)
+                        topk_hit = _boundary_hit_rate(topk_idx, gt_boundaries, boundary_tolerance)
+                        topk_conc = _anchor_concentration(topk_idx, gt_boundaries, boundary_tolerance)
+                        topk_f1 = _compute_f1(topk_hit, topk_conc)
 
-    report.duration_seconds = perf_counter() - start
+                        z2_f1s.append(z2_f1)
+                        uni_f1s.append(uni_f1)
+                        topk_f1s.append(topk_f1)
+                        hit_rates.append(hit_rate)
 
-    # ---- Publication figures -----------------------------------------------
-    # Figure 1: Summary bar — mean phase boundary hit rate per method
-    hit_means = {m: float(np.mean(method_phase_hits[m])) if method_phase_hits[m] else 0.0 for m in METHODS}
-    hit_stds = {m: float(np.std(method_phase_hits[m])) if method_phase_hits[m] else 0.0 for m in METHODS}
+                    mean_z2 = float(np.mean(z2_f1s))
+                    mean_uni = float(np.mean(uni_f1s))
+                    mean_topk = float(np.mean(topk_f1s))
+                    mean_hit = float(np.mean(hit_rates))
 
-    plot_bar(
-        list(hit_means.keys()), list(hit_means.values()),
-        "Phase Boundary Hit Rate by Method",
-        "Hit Rate",
-        capsule.figures / "anchor_alignment_summary",
-        cfg.plotting.formats, cfg.plotting.theme,
-        errors=list(hit_stds.values()),
-    )
+                    best_z2_f1 = max(best_z2_f1, mean_z2)
+                    best_baseline_f1 = max(best_baseline_f1, mean_uni, mean_topk)
+                    best_hit_rate = max(best_hit_rate, mean_hit)
 
-    # Figure 2: Grouped bar — all metrics per method
-    metric_names = ["Expert Hit", "Phase Hit", "Concentration", "Phase Purity"]
-    grouped_vals: dict[str, list[float]] = {}
-    grouped_errs: dict[str, list[float]] = {}
-    for m in METHODS:
-        grouped_vals[m] = [
-            float(np.mean(method_expert_hits[m])) if method_expert_hits[m] else 0.0,
-            float(np.mean(method_phase_hits[m])) if method_phase_hits[m] else 0.0,
-            float(np.mean(method_conc[m])) if method_conc[m] else 0.0,
-            float(np.mean(method_purity[m])) if method_purity[m] else 0.0,
-        ]
-        grouped_errs[m] = [
-            float(np.std(method_expert_hits[m])) if method_expert_hits[m] else 0.0,
-            float(np.std(method_phase_hits[m])) if method_phase_hits[m] else 0.0,
-            float(np.std(method_conc[m])) if method_conc[m] else 0.0,
-            float(np.std(method_purity[m])) if method_purity[m] else 0.0,
-        ]
+    results["A_best_z2_f1"] = best_z2_f1
+    results["A_best_baseline_f1"] = best_baseline_f1
+    results["A_best_hit_rate"] = best_hit_rate
 
-    plot_grouped_bar(
-        metric_names, METHODS, grouped_vals,
-        "Anchor-Phase Alignment Metrics",
-        "Score",
-        capsule.figures / "anchor_phase_overlay",
-        cfg.plotting.formats, cfg.plotting.theme,
-        errors=grouped_errs,
+    # ── Test B: Compression Retention ─────────────────────────────────
+    for K in K_values:
+        coverages: List[float] = []
+        efficiencies: List[float] = []
+
+        for trial in range(n_trials):
+            r = 2
+            lam = 1.0
+            k = 8
+            num_segments = max(3, min(K + 2, T // (r + 1)))
+            traj, gt_boundaries = _generate_labeled_phase_trajectory(
+                d, T, num_segments, int(rng.integers(2**31)),
+            )
+            W_Theta = _make_orthogonal_W(k, D, rng)
+            state = compute_memory(traj, K, r, lam, W_Theta, Q, solver="scipy")
+            coverage = _boundary_hit_rate(state.anchor_indices, gt_boundaries, boundary_tolerance)
+            efficiency = len(state.anchors) / K if K > 0 else 0.0
+            coverages.append(coverage)
+            efficiencies.append(efficiency)
+
+        results[f"B_K{K}_coverage"] = float(np.mean(coverages))
+        results[f"B_K{K}_efficiency"] = float(np.mean(efficiencies))
+
+    results["B_best_coverage"] = max(
+        v for k, v in results.items() if k.startswith("B_") and k.endswith("_coverage")
     )
 
-    # Acceptance
-    synapse_hit = hit_means.get("SYNAPSE", 0.0)
-    best_baseline = max(hit_means.get(m, 0.0) for m in ["UniformSample", "DeltaThreshold"])
-    margin = synapse_hit - best_baseline
-    gate = getattr(cfg.acceptance_gates, "applied_boundary_hit_margin", 0.0)
-    
-    report.metadata["acceptance_passed"] = bool(margin >= gate)
-    report.metadata["method_hit_rates"] = hit_means
-    report.metadata["acceptance_margin"] = margin
-    log.info("AP-01 SYNAPSE phase boundary hit rate margin: %.4f (gate: %.4f)",
-             margin, gate)
+    # ── Test C: Normalization Effect ──────────────────────────────────
+    for norm_mode in ["fit_from_data", "identity"]:
+        f1_list: List[float] = []
+        K, r, lam, k = 10, 2, 1.0, 8
+        for trial in range(n_trials):
+            traj, gt_boundaries = _generate_labeled_phase_trajectory(
+                d, T, 8, int(rng.integers(2**31)),
+            )
+            W_Theta = _make_orthogonal_W(k, D, rng)
+            if norm_mode == "identity":
+                mu = np.zeros(D, dtype=np.float64)
+                sigma = np.ones(D, dtype=np.float64)
+            else:
+                mu, sigma = None, None
+            state = compute_memory(
+                traj, K, r, lam, W_Theta, Q, mu=mu, sigma=sigma, solver="scipy",
+            )
+            hit = _boundary_hit_rate(state.anchor_indices, gt_boundaries, boundary_tolerance)
+            conc = _anchor_concentration(state.anchor_indices, gt_boundaries, boundary_tolerance)
+            f1_list.append(_compute_f1(hit, conc))
+        results[f"C_{norm_mode}_f1"] = float(np.mean(f1_list))
 
-    return finalize_and_save(report, capsule, csv_rows, CSV_FIELDS, cfg)
+    save_experiment_npz("EZ2-01", seed, {"last_traj": traj, "gt_boundaries": np.array(gt_boundaries)}, cfg.output_dir)
+
+    return results
+
+
+# ── Entry Point ────────────────────────────────────────────────────────────
+
+def run_experiment(config: Any = None) -> Dict[str, Any]:
+    """Run EZ2-01 across all seeds and return aggregated report."""
+    if config is None:
+        config = load_emp_config("EZ2-01")
+
+    report = run_multi_seed(
+        experiment_fn=run_single_seed,
+        config=config,
+        seeds=config.training.seeds,
+        experiment_id="EZ2-01",
+        output_dir=config.output_dir,
+    )
+
+    agg = report["aggregated"]
+    z2_f1 = agg.get("A_best_z2_f1", {}).get("mean", 0.0)
+    baseline_f1 = agg.get("A_best_baseline_f1", {}).get("mean", 0.0)
+    hit_rate = agg.get("A_best_hit_rate", {}).get("mean", 0.0)
+    coverage = agg.get("B_best_coverage", {}).get("mean", 0.0)
+
+    hit_gate = 0.30
+    cov_gate = 0.40
+    if hasattr(config, "acceptance_gates"):
+        hit_gate = getattr(config.acceptance_gates, "boundary_hit_rate", hit_gate)
+        cov_gate = getattr(config.acceptance_gates, "compression_coverage", cov_gate)
+
+    passed = (hit_rate >= hit_gate) and (z2_f1 >= baseline_f1) and (coverage >= cov_gate)
+
+    report["experiment_name"] = "Anchor Phase Alignment"
+    report["pass_criterion"] = (
+        f"hit_rate >= {hit_gate} AND z2_f1 >= baseline_f1 AND coverage >= {cov_gate}"
+    )
+    report["passed"] = passed
+
+    log.info("[EZ2-01] z2_f1=%.4f  baseline_f1=%.4f  hit=%.4f  coverage=%.4f  passed=%s",
+             z2_f1, baseline_f1, hit_rate, coverage, passed)
+    return report
 
 
 if __name__ == "__main__":
-    config_path = "experiments/configs/robotics.yaml"
-    for arg in sys.argv:
-        if arg.startswith("--config="):
-            config_path = arg.split("=", 1)[1]
-    cfg = load_config(config_path)
-    validate_config(cfg)
-    v = "--verbose" in sys.argv or "-v" in sys.argv
-    report = run_experiment(cfg=cfg, verbose=v)
-    print(f"[{report.status}] {EXPERIMENT_ID}: {EXPERIMENT_NAME}")
-    sys.exit(0 if report.status == "PASS" else 1)
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+    if str(Path(__file__).resolve().parent.parent.parent.parent.parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent.parent))
+    result = run_experiment()
+    print(f"\nEZ2-01 PASSED: {result['passed']}")

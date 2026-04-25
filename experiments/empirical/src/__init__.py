@@ -1,1 +1,1 @@
-"""SYNAPSE empirical experiment scripts — layered evidence architecture."""
+"""Empirical experiment source modules."""

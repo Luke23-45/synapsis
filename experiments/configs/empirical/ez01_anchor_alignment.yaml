@@ -1,0 +1,34 @@
+# EZ2-01: Anchor Phase Alignment
+# Z2 Reference: §7–8 of 02_rigorous_architecture.md
+#
+# Tests that Z2 anchors align with phase boundaries in piecewise-constant
+# trajectories better than uniform and top-K baselines.
+
+experiment:
+  id: "EZ2-01"
+  name: "Anchor Phase Alignment"
+  formal_reference: "§7–8 of 02_rigorous_architecture.md"
+
+# ── Sweep ranges ─────────────────────────────────────────────────────────
+sweep:
+  K_values: [5, 10, 20]
+  r_values: [1, 2, 5]
+  lam_values: [0.1, 0.5, 1.0, 5.0]
+  k_values: [4, 8]
+
+# ── Data ─────────────────────────────────────────────────────────────────
+data:
+  n_trials: 20
+  noise_std: 0.05
+
+trajectory:
+  T: 100
+
+# ── Evaluation ───────────────────────────────────────────────────────────
+evaluation:
+  boundary_tolerance: 3
+
+# ── Acceptance gates ─────────────────────────────────────────────────────
+acceptance_gates:
+  boundary_hit_rate: 0.30
+  compression_coverage: 0.40

@@ -1,0 +1,13 @@
+# ─── EMP-13: Hard Projection Properties ──────────────────────────────────────
+# Validates Prop 6.1 (determinism + budget |I*| ≤ K) and
+# Prop 6.2 (separation |i-j| > r for all retained pairs)
+
+sweep:
+  K_values: [1, 2, 5, 10, 20]
+  r_values: [0, 1, 2, 5, 10]
+  lam_values: [0.01, 0.1, 1.0, 10.0]
+  n_trials: 20
+  T_stress_values: [100, 500, 1000]
+
+training:
+  seeds: [42, 123, 456]

@@ -1,0 +1,12 @@
+# ─── EMP-12: Exact Recovery Verification ─────────────────────────────────────
+# Validates Theorem 6.3 — exact recovery of target event set C when
+# strict dominance holds: min_{t∈C} y*_t > max_{u∉C} y*_u
+
+sweep:
+  n_trials: 30
+  lambda_values: [0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0]
+  event_magnitudes: [3.0, 5.0, 10.0]
+  noise_stds: [0.01, 0.05, 0.1]
+
+training:
+  seeds: [42, 123, 456]

@@ -1,0 +1,13 @@
+# ─── EMP-07: Scalability Benchmark ──────────────────────────────────────────
+# Validates Theorem 12.2 — O(T log T + K²) empirical runtime scaling
+
+sweep:
+  T_values: [50, 100, 250, 500, 1000, 2500, 5000]
+  K_values: [5, 10, 20, 50]
+  n_repeats: 5
+  T_fixed: 500         # fixed T for K-sweep
+  T_profile: 1000      # T for component profiling
+
+# Override base to reduce noise in timing measurements
+training:
+  seeds: [42, 123, 456]

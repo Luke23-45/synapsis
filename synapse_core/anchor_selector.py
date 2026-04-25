@@ -1,28 +1,35 @@
 """
-Anchor Selector — Formal Math Reference: §4–5 of 01_main_definition.md, §4 of 02_rigorous_architecture.md
+Anchor Selector — Z2 Reference: §5–6 of 02_rigorous_architecture.md
 
-Implements the deterministic anchor selection rule:
+Z2 Selector Pipeline:
+    1. Relaxed selector: y* = argmax_{y ∈ Π_{K,r,T}} (sᵀy − λ‖y‖₂²)   [§5]
+    2. Hard projection:  I* = Proj_{K,r,T}(y*)                       [§6]
+    3. Anchor build:     A* = (a_1, ..., a_m) from I*                [§7]
 
-    I*(x_{1:T}) = LexMin( argmax_{I ∈ 𝔍_{K,r,T}} Σ_{i∈I} e_i )
-    subject to  e_i ≥ τ  for all i ∈ I
+Legacy Z1 selector (select_anchors) retained for backward compatibility.
 
-where:
-    𝔍_{K,r,T} = { I = {i_1 < ... < i_m} ⊆ {2,...,T} : m ≤ K, i_{j+1} − i_j > r }
-
-The LexMin rule selects the lexicographically smallest maximizing index set,
-making the selector deterministic and M a genuine function.
-
-Each anchor a_j = (t_j, s_j, δ_j, ξ_j) stores:
-    t_j = i_j / T          (normalized event time)
+Z2 Anchor a_j = (t_j, s_j, δ_j, ξ_j):
+    t_j = i_j / T          (continuous normalized time, §7)
     s_j = x_{i_j}          (retained state)
-    δ_1 = i_1 − 1          (elapsed since start)
-    δ_j = i_j − i_{j-1}    (elapsed since previous anchor, j ≥ 2)
+    δ_1 = i_1 − 1          (discrete elapsed timesteps since start)
+    δ_j = i_j − i_{j-1}    (discrete elapsed timesteps since prev anchor, j ≥ 2)
     ξ_j = e_{i_j}          (event intensity)
 """
 
 import numpy as np
 from typing import List, Set, Tuple, Optional
 from dataclasses import dataclass
+import warnings
+
+
+# QP solvers leave small positive artifacts at positions where the true
+# optimum is exactly 0.  Artifact magnitude depends on the input: isolated
+# zero-saliency positions yield ~1e-6, but when small saliency values exist
+# elsewhere the solver can distribute ~1e-4 noise across many positions.
+# Genuine activations satisfy y*_t ≥ s_min/(2λ), which is orders of magnitude
+# above this threshold for any reasonable configuration.
+# Used by solve_relaxed_selector and hard_projection.
+_SOLVER_ZERO_TOL: float = 1e-4
 
 
 @dataclass
@@ -314,6 +321,400 @@ def _build_anchors(
 
         # ξ_j = e_{i_j}
         xi_j = scores[idx]
+
+        anchors.append(Anchor(t=t_j, s=s_j, delta=delta_j, xi=xi_j, index=idx))
+
+    return anchors
+
+
+# =======================================================================
+# Z2 Relaxed Selector — §5 of 02_rigorous_architecture.md
+# =======================================================================
+
+def solve_relaxed_selector(
+    saliency: np.ndarray,
+    K: int,
+    r: int,
+    lam: float,
+    solver: str = "osqp",
+) -> np.ndarray:
+    """
+    Solve the Z2 relaxed selector QP over polytope Π_{K,r,T}.
+
+    Z2 Reference: §5 of 02_rigorous_architecture.md
+    Formal Claims: Prop 5.1 (existence & uniqueness), Prop 5.2 (causality)
+
+    The QP in standard form: minimize ½ yᵀPy + qᵀy
+        P = 2λ I_T  (diagonal, PD for λ > 0)
+        q = −s      (negated saliency)
+    subject to:
+        Σ y_t ≤ K                              (budget)
+        y_t + y_u ≤ 1  for 1 ≤ |t−u| ≤ r     (refractory)
+        0 ≤ y_t ≤ 1                            (box)
+        y_1 = 0                                (first-step)
+
+    Parameters
+    ----------
+    saliency : np.ndarray, shape (T,)
+        Causal saliency scores s_{1:T}. Must satisfy s[0] = 0 (first step).
+    K : int
+        Maximum anchor budget (K ≥ 1).
+    r : int
+        Refractory separation (r ≥ 0).
+    lam : float
+        Strong-concavity parameter (λ > 0).
+    solver : str
+        QP solver backend: "osqp" or "scipy".
+
+    Returns
+    -------
+    y_star : np.ndarray, shape (T,)
+        The unique relaxed selector output y* ∈ Π_{K,r,T}.
+
+    Raises
+    ------
+    ValueError
+        If lam ≤ 0, K < 1, or saliency is empty.
+    RuntimeError
+        If the QP solver fails.
+    """
+    saliency = np.asarray(saliency, dtype=np.float64)
+    if saliency.ndim != 1:
+        raise ValueError(f"saliency must be one-dimensional, got shape {saliency.shape}")
+    if not np.all(np.isfinite(saliency)):
+        raise ValueError("saliency must contain only finite values")
+
+    T = saliency.shape[0]
+
+    if T < 1:
+        raise ValueError("Saliency must have at least 1 timestep.")
+    if K < 1:
+        raise ValueError(f"K must be ≥ 1, got {K}")
+    if lam <= 0:
+        raise ValueError(f"λ must be > 0, got {lam}")
+
+    # Trivial case: T = 1 → y = [0] (only feasible point)
+    if T == 1:
+        return np.array([0.0], dtype=np.float64)
+
+    # Build QP: minimize ½ yᵀPy + qᵀy
+    P = 2.0 * lam * np.eye(T, dtype=np.float64)
+    q = -saliency.astype(np.float64)
+
+    # --- Inequality constraints: A_ub @ y ≤ b_ub ---
+    rows_A = []
+    rows_b = []
+
+    # Budget: Σ y_t ≤ K
+    rows_A.append(np.ones(T))
+    rows_b.append(float(K))
+
+    # Refractory: y_t + y_u ≤ 1 for 1 ≤ |t−u| ≤ r
+    for t in range(T):
+        for u in range(t + 1, min(t + r + 1, T)):
+            row = np.zeros(T)
+            row[t] = 1.0
+            row[u] = 1.0
+            rows_A.append(row)
+            rows_b.append(1.0)
+
+    A_ub = np.array(rows_A, dtype=np.float64) if rows_A else np.empty((0, T), dtype=np.float64)
+    b_ub = np.array(rows_b, dtype=np.float64) if rows_b else np.empty(0, dtype=np.float64)
+
+    # --- Equality constraint: y_1 = 0 (0-indexed: y[0] = 0) ---
+    A_eq = np.zeros((1, T), dtype=np.float64)
+    A_eq[0, 0] = 1.0
+    b_eq = np.array([0.0], dtype=np.float64)
+
+    # --- Bounds: 0 ≤ y_t ≤ 1 ---
+    bounds = [(0.0, 1.0)] * T
+
+    # Solve QP
+    if solver == "osqp":
+        y_star = _solve_osqp(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+    else:
+        y_star = _solve_scipy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+
+    # Numerical cleanup: QP solvers leave small positive artifacts at
+    # positions where the true optimum is exactly 0 (lower bound active).
+    # Snapping these to 0 restores the mathematical structure of the solution
+    # and prevents spurious entries in the positive support used by hard_projection.
+    y_star[y_star < _SOLVER_ZERO_TOL] = 0.0
+
+    return y_star
+
+
+def _solve_osqp(
+    P: np.ndarray,
+    q: np.ndarray,
+    A_ub: np.ndarray,
+    b_ub: np.ndarray,
+    A_eq: np.ndarray,
+    b_eq: np.ndarray,
+    bounds: list,
+    T: int,
+) -> np.ndarray:
+    """Solve QP using OSQP."""
+    try:
+        import osqp
+    except ImportError:
+        warnings.warn("osqp not installed, falling back to scipy", RuntimeWarning)
+        return _solve_scipy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+
+    # OSQP form: minimize ½ xᵀPx + qᵀx  s.t. l ≤ Ax ≤ u
+    # Stack inequality and equality into A_osqp
+    n_ineq = A_ub.shape[0] if A_ub.size else 0
+    n_eq = A_eq.shape[0] if A_eq.size else 0
+
+    # Build A: [A_ub; A_eq; I (for bounds)]
+    # Bounds as inequality: y_t ≥ 0 → -y_t ≤ 0, y_t ≤ 1
+    A_list = []
+    l_list = []
+    u_list = []
+
+    # Inequality: A_ub y ≤ b_ub  →  l = -inf, u = b_ub
+    if n_ineq > 0:
+        A_list.append(A_ub)
+        l_list.append(np.full(n_ineq, -np.inf))
+        u_list.append(b_ub)
+
+    # Equality: A_eq y = b_eq  →  l = u = b_eq
+    if n_eq > 0:
+        A_list.append(A_eq)
+        l_list.append(b_eq)
+        u_list.append(b_eq)
+
+    # Bounds: 0 ≤ y_t ≤ 1
+    A_list.append(np.eye(T))
+    l_list.append(np.zeros(T))
+    u_list.append(np.ones(T))
+
+    A_osqp = np.vstack(A_list)
+    l_osqp = np.concatenate(l_list)
+    u_osqp = np.concatenate(u_list)
+
+    # OSQP expects sparse matrices
+    from scipy.sparse import csc_matrix
+    P_sparse = csc_matrix(P)
+    A_sparse = csc_matrix(A_osqp)
+
+    prob = osqp.OSQP()
+    prob.setup(P_sparse, q, A_sparse, l_osqp, u_osqp,
+               verbose=False, eps_abs=1e-9, eps_rel=1e-9, max_iter=10000)
+    res = prob.solve()
+
+    if res.info.status_val not in (1,):  # 1 = solved
+        raise RuntimeError(
+            f"OSQP solver failed with status: {res.info.status}. "
+            f"Falling back to scipy may help."
+        )
+
+    return res.x.astype(np.float64)
+
+
+def _solve_scipy(
+    P: np.ndarray,
+    q: np.ndarray,
+    A_ub: np.ndarray,
+    b_ub: np.ndarray,
+    A_eq: np.ndarray,
+    b_eq: np.ndarray,
+    bounds: list,
+    T: int,
+) -> np.ndarray:
+    """Solve QP using scipy.optimize.minimize (trust-constr with Hessian)."""
+    from scipy.optimize import minimize as sp_minimize, LinearConstraint
+
+    def objective(y):
+        return 0.5 * y @ P @ y + q @ y
+
+    def jac(y):
+        return P @ y + q
+
+    def hess(y):
+        return P
+
+    # Build LinearConstraint objects for trust-constr
+    constraints = []
+
+    # Inequality: A_ub y ≤ b_ub  →  -inf ≤ A_ub y ≤ b_ub
+    n_ineq = A_ub.shape[0] if A_ub.size else 0
+    if n_ineq > 0:
+        constraints.append(LinearConstraint(A_ub, -np.inf, b_ub))
+
+    # Equality: A_eq y = b_eq  →  b_eq ≤ A_eq y ≤ b_eq
+    n_eq = A_eq.shape[0] if A_eq.size else 0
+    if n_eq > 0:
+        constraints.append(LinearConstraint(A_eq, b_eq, b_eq))
+
+    y0 = np.zeros(T, dtype=np.float64)
+
+    # Try trust-constr first (handles QPs well with Hessian)
+    import warnings as _warnings
+    try:
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore")  # Suppress Singular Jacobian warnings
+            result = sp_minimize(
+                objective, y0, jac=jac, hess=hess, method="trust-constr",
+                bounds=bounds, constraints=constraints,
+                options={"gtol": 1e-12, "maxiter": 2000, "verbose": 0},
+            )
+        if result.success:
+            return result.x.astype(np.float64)
+    except Exception:
+        pass
+
+    # Fallback: SLSQP (no Hessian support but works for smaller problems)
+    slsqp_constraints = []
+    if n_ineq > 0:
+        slsqp_constraints.append({
+            "type": "ineq",
+            "fun": lambda y: b_ub - A_ub @ y,
+            "jac": lambda y: -A_ub,
+        })
+    if n_eq > 0:
+        slsqp_constraints.append({
+            "type": "eq",
+            "fun": lambda y: A_eq @ y - b_eq,
+            "jac": lambda y: A_eq,
+        })
+
+    result = sp_minimize(
+        objective, y0, jac=jac, method="SLSQP",
+        bounds=bounds, constraints=slsqp_constraints,
+        options={"ftol": 1e-15, "maxiter": 5000, "disp": False},
+    )
+
+    if not result.success:
+        raise RuntimeError(f"scipy QP solver failed: {result.message}")
+
+    return result.x.astype(np.float64)
+
+
+# =======================================================================
+# Z2 Hard Projection — §6 of 02_rigorous_architecture.md
+# =======================================================================
+
+def hard_projection(
+    y_star: np.ndarray,
+    K: int,
+    r: int,
+) -> List[int]:
+    """
+    Deterministic hard projection Proj_{K,r,T}(y*).
+
+    Z2 Reference: §6 of 02_rigorous_architecture.md
+    Formal Claims: Prop 6.1 (determinism & budget), Prop 6.2 (separation)
+
+    Algorithm:
+        1. Compute supp⁺(y*) = {t ∈ {2,...,T} : y*_t > 0}
+        2. Sort indices by decreasing y*_t, ties broken by **smaller t**
+           (Prop 6.1: determinism via smaller-t tiebreak)
+        3. Greedily accept indices that satisfy |i−j| > r from all
+           previously retained indices, until K selections made or
+           positive-support exhausted.
+
+    Parameters
+    ----------
+    y_star : np.ndarray, shape (T,)
+        Relaxed selector output y* ∈ [0,1]^T.
+    K : int
+        Maximum anchor budget.
+    r : int
+        Refractory separation.
+
+    Returns
+    -------
+    I_star : list of int
+        Retained indices (0-indexed), sorted in increasing order.
+        |I_star| ≤ K always (Prop 6.1).
+    """
+    T = len(y_star)
+    if T < 2 or K < 1:
+        return []
+
+    # Step 1: supp⁺(y*) — indices t ∈ {1,...,T-1} (0-indexed) where y*_t > 0
+    # Formal: t ∈ {2,...,T} (1-indexed) where y*_t > 0
+    # 0-indexed: positions 1..T-1 where y_star[t] > 0
+    positive_support = [t for t in range(1, T) if y_star[t] > _SOLVER_ZERO_TOL]
+
+    if not positive_support:
+        return []
+
+    # Step 2: Sort by decreasing y*_t, ties broken by smaller t (Prop 6.1)
+    sorted_indices = sorted(positive_support, key=lambda t: (-y_star[t], t))
+
+    # Step 3: Greedy accept with separation |i−j| > r (Prop 6.2)
+    retained = []
+    for idx in sorted_indices:
+        if len(retained) >= K:
+            break
+        # Check separation against all previously retained indices
+        if all(abs(idx - ret) > r for ret in retained):
+            retained.append(idx)
+
+    # Return sorted in increasing order (formal I* = {i_1 < ... < i_m})
+    retained.sort()
+    return retained
+
+
+# =======================================================================
+# Z2 Anchor Construction — §7 of 02_rigorous_architecture.md
+# =======================================================================
+
+def build_anchors(
+    I_star: List[int],
+    trajectory: np.ndarray,
+    event_scores: np.ndarray,
+) -> List[Anchor]:
+    """
+    Build the Z2 anchor sequence A* from the retained index set I*.
+
+    Z2 Reference: §7 of 02_rigorous_architecture.md
+
+    For each i_j ∈ I* = {i_1 < ... < i_m}:
+        t_j = i_j / T          (continuous normalized time)
+        s_j = x_{i_j}          (retained state)
+        δ_1 = i_1 − 1          (discrete elapsed timesteps)
+        δ_j = i_j − i_{j-1}    (discrete elapsed timesteps, j ≥ 2)
+        ξ_j = e_{i_j}          (event intensity)
+
+    Parameters
+    ----------
+    I_star : list of int
+        Retained indices (0-indexed), sorted in increasing order.
+    trajectory : np.ndarray, shape (T, d)
+        Input trajectory x_{1:T}.
+    event_scores : np.ndarray, shape (T,)
+        Event scores e_{1:T}.
+
+    Returns
+    -------
+    anchors : list of Anchor
+        The anchor sequence A*(x_{1:T}).
+    """
+    T = trajectory.shape[0]
+    if not I_star:
+        return []
+
+    anchors = []
+    for j, idx in enumerate(I_star):
+        # t_j = (idx + 1) / T  [0-indexed idx → formal 1-indexed i_j = idx+1]
+        t_j = (idx + 1) / T
+
+        # s_j = x_{i_j}
+        s_j = trajectory[idx].copy()
+
+        # δ_j — DISCRETE elapsed timesteps (§7: "δ_j counts elapsed timesteps")
+        if j == 0:
+            # δ_1 = i_1 − 1 (formal), which is idx in 0-indexed
+            delta_j = idx
+        else:
+            # δ_j = i_j − i_{j-1} (formal), same in 0-indexed
+            delta_j = idx - I_star[j - 1]
+
+        # ξ_j = e_{i_j}
+        xi_j = event_scores[idx]
 
         anchors.append(Anchor(t=t_j, s=s_j, delta=delta_j, xi=xi_j, index=idx))
 

@@ -85,6 +85,42 @@ def piecewise_constant(
     return trajectory, change_points
 
 
+def piecewise_constant_auto(
+    d: int,
+    T: int,
+    num_segments: int = 5,
+    jump_magnitude: float = 5.0,
+    seed: Optional[int] = None,
+) -> np.ndarray:
+    """
+    Generate a piecewise-constant trajectory with automatically spaced change points.
+
+    Convenience wrapper around piecewise_constant that evenly spaces
+    num_segments - 1 change points across the trajectory.
+
+    Parameters
+    ----------
+    d : int
+        Ambient dimension.
+    T : int
+        Trajectory length.
+    num_segments : int
+        Number of constant segments (≥ 2).
+    jump_magnitude : float
+        Magnitude of jumps between segments.
+    seed : int, optional
+        Random seed.
+
+    Returns
+    -------
+    trajectory : np.ndarray, shape (T, d)
+    """
+    n_cps = max(1, num_segments - 1)
+    cps = list(np.linspace(T // (n_cps + 1), T - T // (n_cps + 1), num=n_cps, dtype=int))
+    traj, _ = piecewise_constant(d, T, cps, jump_magnitude=jump_magnitude, seed=seed)
+    return traj
+
+
 def random_walk(
     d: int,
     T: int,

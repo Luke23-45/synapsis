@@ -1,1 +1,1 @@
-"""Secondary empirical layer: controlled mechanistic studies on synthetic sequences."""
+"""Foundation empirical experiments (EZ2-03, EZ2-04)."""

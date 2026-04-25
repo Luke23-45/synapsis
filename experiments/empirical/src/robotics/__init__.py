@@ -1,1 +1,1 @@
-"""Primary empirical layer: real-trajectory validation without model training."""
+"""Robotics empirical experiments (EZ2-01, EZ2-02)."""

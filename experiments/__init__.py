@@ -1,55 +1,33 @@
 """
-SYNAPSE Experiments
-====================
+SYNAPSE Z2 Experiments
+=======================
 
-Self-contained verification framework for the memory operator M.
+Verification and empirical validation framework for the Z2 memory operator.
 
-Everything is inside this directory: configs, scripts, utils,
-common infrastructure, verification experiments, and outputs.
-
-Structure
----------
+Structure (10 total experiments)
+---------------------------------
 ::
 
     experiments/
-    ├── configs/
-    │   └── default.yaml            -- YAML experiment config
-    │
     ├── scripts/
-    │   └── experiment_runner.py     -- CLI: run one or all experiments
+    │   ├── experiment_runner.py     -- CLI: verification experiments
+    │   └── empirical_runner.py      -- CLI: empirical experiments
     │
-    ├── utils/                       -- Shared infrastructure (from GibbsQ)
-    │   ├── config.py                -- Typed dataclass config
-    │   ├── model_io.py              -- Run capsule management
-    │   ├── logging.py               -- Per-run file logging
-    │   ├── exporter.py              -- JSONL + CSV export
-    │   ├── progress.py              -- tqdm progress bars
-    │   └── run_artifacts.py         -- Path helpers
+    ├── verification/                -- 6 formal claim verifications
+    │   ├── relaxed_selector.py      -- VZ2-01: Prop 5.1, 5.2
+    │   ├── hard_projection.py       -- VZ2-02: Prop 6.1, 6.2
+    │   ├── exact_recovery.py        -- VZ2-03: Thm 6.3
+    │   ├── full_operator.py         -- VZ2-04: Thm 12.1, 12.2
+    │   ├── topological_stability.py -- VZ2-05: Thm 12.3
+    │   └── sufficiency_metric.py    -- VZ2-06: Prop 12.4, 9.1
     │
-    ├── common/                      -- Shared experiment code
-    │   ├── chart_exporter.py        -- Multi-format chart/data export
-    │   ├── metrics.py               -- Distance/comparison functions
-    │   ├── plotting.py              -- Domain-specific plot functions
-    │   ├── report.py                -- Structured reporting
-    │   ├── theme.py                 -- Publication matplotlib themes
-    │   └── trajectory_generators.py -- Synthetic trajectory factories
-    │
-    ├── verification/                -- Formal claim verification
-    │   ├── causality.py             -- EXP-01: Theorem 8.1
-    │   ├── bounded_cardinality.py   -- EXP-02: Theorem 8.2
-    │   ├── changepoint_identification.py -- EXP-03: Theorem 8.3
-    │   ├── exact_reconstruction.py  -- EXP-04: Corollary 8.4
-    │   ├── topological_stability.py -- EXP-05: Theorem 8.5
-    │   ├── hysteretic_encoding.py   -- EXP-06: Section 3
-    │   ├── information_loss.py      -- EXP-07: Proposition 8.6
-    │   └── end_to_end.py            -- EXP-08: Section 8
-    │
-    └── outputs/                     -- Run capsules go here
+    ├── empirical/src/               -- 4 empirical experiments
+    │   ├── robotics/
+    │   │   ├── anchor_phase_alignment.py  -- EZ2-01
+    │   │   └── topology_structure.py      -- EZ2-02
+    │   └── foundation/
+    │       ├── event_sparse_recovery.py   -- EZ2-03
+    │       └── memory_sufficiency.py      -- EZ2-04
 
-Run via
--------
-::
-
-    python experiments/scripts/experiment_runner.py all --verbose
-    python experiments/scripts/experiment_runner.py causality -v
+Source of truth: docs/formal_math/z2/
 """

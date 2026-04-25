@@ -1,0 +1,17 @@
+# ─── EMP-08: Hyperparameter Sensitivity ─────────────────────────────────────
+# Systematic sweep of λ, K, r — produces degradation curves and 2D heatmaps
+
+sweep:
+  lambda_values: [0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0]
+  K_values: [3, 5, 10, 15, 20, 30]
+  r_values: [0, 1, 2, 3, 5, 8]
+  heatmap_lambdas: [0.1, 0.5, 1.0, 5.0, 10.0]
+  heatmap_Ks: [5, 10, 20]
+
+data:
+  n_trials: 30
+
+tolerance: 2
+
+training:
+  seeds: [42, 123, 456]

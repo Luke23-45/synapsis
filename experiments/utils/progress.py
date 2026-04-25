@@ -99,6 +99,18 @@ class _NullProgress:
         return False
 
 
+def _infer_total(iterable: Iterable[Any] | None, total: int | None) -> int | None:
+    """Derive ``total`` from the iterable when not explicitly provided."""
+    if total is not None:
+        return total
+    if iterable is not None:
+        try:
+            return len(iterable)  # type: ignore[arg-type]
+        except (TypeError, AttributeError):
+            pass
+    return None
+
+
 def create_progress(
     *,
     total: int | None = None,
@@ -111,9 +123,10 @@ def create_progress(
     """Create a tqdm progress bar or a no-op stand-in."""
     if not _should_show(mode):
         return _NullProgress(iterable=iterable)
+    resolved_total = _infer_total(iterable, total)
     merged = {"dynamic_ncols": True, "mininterval": 0.5}
     merged.update(kwargs)
-    return _tqdm(iterable=iterable, total=total, desc=desc, unit=unit, **merged)
+    return _tqdm(iterable=iterable, total=resolved_total, desc=desc, unit=unit, **merged)
 
 
 def iter_progress(
@@ -124,7 +137,12 @@ def iter_progress(
     mode: str | None = None,
     **kwargs: Any,
 ):
-    """Wrap an iterable with a live progress bar when enabled."""
+    """Wrap an iterable with a live progress bar when enabled.
+
+    If *total* is not given and the iterable supports ``len()``,
+    the total is inferred automatically so that tqdm can display
+    an estimated time of arrival (ETA).
+    """
     return create_progress(iterable=iterable, total=total, desc=desc, mode=mode, **kwargs)
 
 

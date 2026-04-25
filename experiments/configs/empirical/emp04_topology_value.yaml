@@ -1,0 +1,32 @@
+# EMP-04: Topology Branch Value Validation
+# Z2 Reference: §10 of 02_rigorous_architecture.md
+#
+# Shows that persistence diagrams add non-redundant information beyond
+# cloud geometry alone.
+
+experiment:
+  id: "EMP-04"
+  name: "Topology Branch Value"
+  formal_reference: "§10 of 02_rigorous_architecture.md"
+
+# ── Data ─────────────────────────────────────────────────────────────────
+data:
+  n_train: 200
+  n_val: 50
+  n_test: 100
+  noise_std: 0.05
+
+trajectory:
+  T: 120
+
+# ── Feature sets evaluated ──────────────────────────────────────────────
+feature_sets:
+  - cloud_only
+  - topo_only
+  - cloud_topo
+  - proxy_only
+  - cloud_proxy
+
+# ── Acceptance gates ─────────────────────────────────────────────────────
+acceptance_gates:
+  cloud_topo_vs_cloud_only: 0.0   # cloud+topo strictly beats cloud-only

@@ -1,0 +1,99 @@
+# SYNAPSE Z2 Verification Experiment Configuration
+# Stricter tolerances and more replications than default.yaml
+
+memory_operator:
+  selector:
+    K: 10
+    r: 2
+    lam: 1.0
+    solver: "osqp"
+  normalization:
+    fit_from_data: true
+  lift:
+    k: 8
+    init: "orthogonal"
+  topology:
+    Q: 1
+  saliency:
+    mode: "identity"
+    temperature: 1.0
+
+encoder:
+  mode: "sharp"
+  alpha: 0.0
+
+trajectory:
+  d: 5
+  T: 100
+  seed: 42
+
+execution:
+  num_replications: 100
+  seed: 42
+  verbose: true
+  strict: true
+
+verification:
+  score_match_atol: 1.0e-15
+  reconstruction_atol: 1.0e-15
+  hausdorff_rtol: 1.0e-12
+  bottleneck_rtol: 1.0e-12
+  history_diff_threshold: 1.0e-12
+
+plotting:
+  theme: "publication"
+  formats: ["png", "pdf"]
+  dpi: 600
+
+output_dir: "experiments/outputs"
+log_dir: "experiments/outputs/logs"
+
+# Per-experiment overrides (stricter sweeps)
+experiments:
+  vz2_01_relaxed_selector:
+    dims: [2, 5, 10]
+    lengths: [50, 100, 200]
+    lambda_values: [0.01, 0.1, 0.5, 1.0, 5.0, 10.0]
+    num_perturbations: 100
+
+  vz2_02_hard_projection:
+    dims: [2, 5, 10]
+    lengths: [50, 100, 200, 500]
+    K_values: [3, 5, 10, 20]
+    r_values: [0, 1, 2, 5]
+
+  vz2_03_exact_recovery:
+    dims: [3, 5]
+    lengths: [100, 200]
+    num_trials: 200
+
+  vz2_04_full_operator:
+    dims: [3, 5]
+    lengths: [50, 100]
+    K_values: [5]
+    encoder_modes: ["sharp"]
+    bounded_trials: 5
+
+  vz2_05_topological_stability:
+    m_values: [5, 10, 20]
+    D_values: [5, 8]
+    epsilon_values: [0.001, 0.01, 0.05, 0.1, 0.5, 1.0]
+    num_perturbations: 100
+
+  vz2_06_sufficiency_metric:
+    dims: [3, 5]
+    lengths: [100, 200]
+    k_values: [4, 8, 16]
+
+  vz2_07_encoder_saliency:
+    dims: [2, 5]
+    lengths: [50, 100]
+    alpha_values: [0.2, 0.6]
+    num_perturbations: 50
+    saliency_modes: ["identity", "z_score", "temperature"]
+    temperatures: [0.5, 1.0, 2.0]
+
+  vz2_08_anchor_geometry_readout:
+    dims: [2, 4]
+    lengths: [40, 80]
+    num_trials: 20

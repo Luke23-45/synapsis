@@ -1,5 +1,8 @@
 """
-Config loading and validation for SYNAPSE empirical experiments.
+Config loading and validation for SYNAPSE Z2 empirical experiments.
+
+Z2 Reference: Validates lam > 0, k ≥ 1, sigma > 0 (§8 invariant)
+Replaces Z1 tau/weights validation with Z2 parameter checks.
 """
 
 from __future__ import annotations
@@ -42,13 +45,24 @@ def to_plain_dict(cfg: SimpleNamespace) -> dict:
 def validate_config(cfg: SimpleNamespace) -> None:
     """Validate config. Only universally-required sections are enforced;
     experiment-specific sections are validated only if present."""
-    # Universal minimum: every config must have these
     required_sections = ["memory", "acceptance_gates", "plotting", "output_dir"]
     for section in required_sections:
         if not hasattr(cfg, section):
             raise ValueError(f"Missing required config section: {section}")
-    if cfg.memory.K <= 0:
+
+    mem = cfg.memory
+    if mem.K <= 0:
         raise ValueError("memory.K must be positive")
+    if mem.lam <= 0:
+        raise ValueError("memory.lam must be positive")
+    if mem.k < 1:
+        raise ValueError("memory.k must be >= 1")
+
+    # Conditional: normalization
+    if hasattr(mem, "normalization") and hasattr(mem.normalization, "sigma"):
+        for s in mem.normalization.sigma:
+            if s <= 0:
+                raise ValueError("memory.normalization.sigma entries must be > 0 (§8 invariant)")
 
     # Conditional checks: only validate if the section exists
     if hasattr(cfg, "training"):

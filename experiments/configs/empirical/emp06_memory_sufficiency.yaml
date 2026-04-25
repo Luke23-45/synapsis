@@ -1,0 +1,39 @@
+# EMP-06: Enhanced Memory Sufficiency Probe
+# Z2 Reference: §13 of 02_rigorous_architecture.md, Prop 12.4
+#
+# Extends EZ2-04 with neural baselines (GRU, Transformer) and
+# multi-seed statistical reporting.
+
+experiment:
+  id: "EMP-06"
+  name: "Enhanced Memory Sufficiency"
+  formal_reference: "§13, Prop 12.4 of 02_rigorous_architecture.md"
+
+# ── Task families ────────────────────────────────────────────────────────
+task_families:
+  - delayed_retrieval
+  - ordered_trigger_response
+  - phase_conditioned_decision
+  - revisit_dependent_rule_switching
+
+# ── Baselines ────────────────────────────────────────────────────────────
+ridge_baselines: ["B0", "B3", "B4", "B5", "B6", "B7"]
+neural_baselines: ["B8_GRU", "B9_Trans"]
+
+# ── Data ─────────────────────────────────────────────────────────────────
+data:
+  n_train: 80
+  n_val: 30
+  n_test: 50
+
+# ── Training ─────────────────────────────────────────────────────────────
+training:
+  probe_epochs: 30             # ridge probe is cheap, but MLP probes need this
+  neural_epochs: 40            # for GRU / Transformer baselines
+  lr: 1.0e-3
+  batch_size: 32
+
+# ── Acceptance gates ─────────────────────────────────────────────────────
+acceptance_gates:
+  b6_vs_b8_margin: 0.05       # B6 competitive within 5% of B8_GRU
+  min_competitive_families: 0.50  # on ≥50% of families

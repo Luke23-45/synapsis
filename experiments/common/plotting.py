@@ -1,11 +1,13 @@
 """
-Domain-specific plotting for SYNAPSE experiment verification.
+Domain-specific plotting for SYNAPSE Z2 experiment verification.
 
 Each plot function produces publication-quality figures for a specific
 formal verification result, following the GibbsQ plotting pattern:
 - Theme-aware (publication / dark)
 - Multi-format export via chart_exporter
 - Colorblind-safe palettes
+
+Z2 additions: plot_relaxed_selector, plot_anchor_lift, plot_normalization_effect
 """
 
 from __future__ import annotations
@@ -32,6 +34,10 @@ __all__ = [
     "plot_cardinality_vs_K",
     "plot_collision_rates",
     "plot_experiment_summary",
+    # Z2 additions
+    "plot_relaxed_selector",
+    "plot_anchor_lift",
+    "plot_normalization_effect",
 ]
 
 
@@ -439,6 +445,207 @@ def plot_experiment_summary(
     ax_right.set_yticks([])
     ax_right.invert_yaxis()
 
+    plt.tight_layout()
+
+    if save_path:
+        save_chart(fig, Path(save_path), formats or ["png", "pdf"], close_fig=False)
+
+    return fig
+
+
+# =======================================================================
+# Z2-Specific Plot Functions
+# =======================================================================
+
+def plot_relaxed_selector(
+    saliency: np.ndarray,
+    y_star: np.ndarray,
+    anchor_indices: Optional[List[int]] = None,
+    lam: Optional[float] = None,
+    title: str = "Relaxed Selector Allocation",
+    save_path: Optional[Union[str, Path]] = None,
+    formats: Optional[List[str]] = None,
+    theme: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Visualise saliency scores and relaxed selector allocations y*.
+
+    Z2 Reference: §5 of 02_rigorous_architecture.md
+
+    Parameters
+    ----------
+    saliency : ndarray (T,)
+        Causal saliency scores s_{1:T}.
+    y_star : ndarray (T,)
+        Relaxed selector output y* ∈ [0,1]^T.
+    anchor_indices : list of int, optional
+        Hard-projected indices for overlay.
+    lam : float, optional
+        λ parameter for display in title.
+    """
+    theme = _setup(theme)
+    palette = THEMES[theme].color_palette
+
+    T = len(saliency)
+    t = np.arange(T)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # Saliency scores
+    ax.fill_between(t, 0, saliency, alpha=0.2, color=palette[0])
+    ax.plot(t, saliency, color=palette[0], linewidth=1.0, label=r"Saliency $s_t$")
+
+    # Relaxed allocation
+    ax.bar(t, y_star, width=0.8, alpha=0.5, color=palette[1],
+           label=r"Relaxed $y^*_t$")
+
+    # Hard-projected anchors
+    if anchor_indices:
+        ax.scatter(
+            anchor_indices,
+            [y_star[i] for i in anchor_indices],
+            color=palette[5], s=60, zorder=5, marker="v",
+            label=f"Hard projection (m={len(anchor_indices)})",
+        )
+
+    lam_str = f", $\\lambda={lam}$" if lam is not None else ""
+    ax.set_xlabel("Time index $t$")
+    ax.set_ylabel("Value")
+    ax.set_title(f"{title}{lam_str}")
+    ax.legend(loc="upper right")
+
+    plt.tight_layout()
+
+    if save_path:
+        save_chart(fig, Path(save_path), formats or ["png", "pdf"], close_fig=False)
+
+    return fig
+
+
+def plot_anchor_lift(
+    anchors_raw: np.ndarray,
+    anchors_lifted: np.ndarray,
+    title: str = "Anchor Cloud: Raw → Lifted",
+    save_path: Optional[Union[str, Path]] = None,
+    formats: Optional[List[str]] = None,
+    theme: Optional[str] = None,
+) -> plt.Figure:
+    """
+    2D/3D scatter of raw anchor vectors vs lifted anchor cloud.
+
+    Z2 Reference: §9 of 02_rigorous_architecture.md
+
+    Parameters
+    ----------
+    anchors_raw : ndarray (m, D)
+        Raw anchor vectors v(a_j) ∈ ℝ^{d+3}.
+    anchors_lifted : ndarray (m, k)
+        Lifted points ρ_Θ(a_j) ∈ ℝ^k.
+    """
+    theme = _setup(theme)
+    palette = THEMES[theme].color_palette
+
+    m = anchors_raw.shape[0]
+    if m == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "Empty cloud", ha="center", va="center")
+        return fig
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # Left: first 2 dims of raw anchors
+    ax_raw = axes[0]
+    if anchors_raw.shape[1] >= 2:
+        ax_raw.scatter(anchors_raw[:, 0], anchors_raw[:, 1],
+                       c=palette[0], s=40, alpha=0.8, edgecolors="white")
+        ax_raw.set_xlabel(r"$v_1$")
+        ax_raw.set_ylabel(r"$v_2$")
+    ax_raw.set_title(r"Raw anchors $v(a_j)$")
+
+    # Right: first 2 dims of lifted cloud
+    ax_lift = axes[1]
+    if anchors_lifted.shape[1] >= 2:
+        ax_lift.scatter(anchors_lifted[:, 0], anchors_lifted[:, 1],
+                        c=palette[5], s=40, alpha=0.8, edgecolors="white")
+        ax_lift.set_xlabel(r"$\rho_1$")
+        ax_lift.set_ylabel(r"$\rho_2$")
+    elif anchors_lifted.shape[1] == 1:
+        ax_lift.scatter(np.arange(m), anchors_lifted[:, 0],
+                        c=palette[5], s=40, alpha=0.8)
+        ax_lift.set_xlabel("Anchor index $j$")
+        ax_lift.set_ylabel(r"$\rho_1$")
+    ax_lift.set_title(r"Lifted cloud $\rho_\Theta(a_j)$")
+
+    fig.suptitle(title)
+    plt.tight_layout()
+
+    if save_path:
+        save_chart(fig, Path(save_path), formats or ["png", "pdf"], close_fig=False)
+
+    return fig
+
+
+def plot_normalization_effect(
+    raw_vectors: np.ndarray,
+    normalized_vectors: np.ndarray,
+    title: str = "Normalization Effect: $N(v) = D^{-1}(v - \\mu)$",
+    save_path: Optional[Union[str, Path]] = None,
+    formats: Optional[List[str]] = None,
+    theme: Optional[str] = None,
+) -> plt.Figure:
+    """
+    Before/after normalization visualization.
+
+    Z2 Reference: §8 of 02_rigorous_architecture.md
+
+    Parameters
+    ----------
+    raw_vectors : ndarray (m, D)
+        Raw anchor vectors v(a_j).
+    normalized_vectors : ndarray (m, D)
+        Normalized vectors N(v(a_j)).
+    """
+    theme = _setup(theme)
+    palette = THEMES[theme].color_palette
+
+    m = raw_vectors.shape[0]
+    if m == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "Empty cloud", ha="center", va="center")
+        return fig
+
+    D = raw_vectors.shape[1]
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Left: raw vector component ranges
+    ax_raw = axes[0]
+    raw_means = np.mean(raw_vectors, axis=0)
+    raw_stds = np.std(raw_vectors, axis=0)
+    dims = np.arange(D)
+    ax_raw.bar(dims - 0.15, raw_means, width=0.3, color=palette[0],
+               alpha=0.8, label="Mean")
+    ax_raw.bar(dims + 0.15, raw_stds, width=0.3, color=palette[1],
+               alpha=0.8, label="Std")
+    ax_raw.set_xlabel("Dimension $\\ell$")
+    ax_raw.set_ylabel("Value")
+    ax_raw.set_title("Raw $v(a_j)$")
+    ax_raw.legend()
+
+    # Right: normalized vector component ranges
+    ax_norm = axes[1]
+    norm_means = np.mean(normalized_vectors, axis=0)
+    norm_stds = np.std(normalized_vectors, axis=0)
+    ax_norm.bar(dims - 0.15, norm_means, width=0.3, color=palette[0],
+                alpha=0.8, label="Mean")
+    ax_norm.bar(dims + 0.15, norm_stds, width=0.3, color=palette[1],
+                alpha=0.8, label="Std")
+    ax_norm.set_xlabel("Dimension $\\ell$")
+    ax_norm.set_ylabel("Value")
+    ax_norm.set_title("Normalized $N(v(a_j))$")
+    ax_norm.legend()
+
+    fig.suptitle(title)
     plt.tight_layout()
 
     if save_path:

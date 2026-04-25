@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nth-attention"
+name = "synapse-robotics"
 version = "0.1.0"
-description = "Neuro-Topological Hysteresis Attention Architecture for Robotic Memory"
+description = "Neuro-Topological Hysteresis Attention (SYNAPSE) Architecture for Robotic Memory"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -18,16 +18,30 @@ dependencies = [
     "einops>=0.7.0",
     "scipy>=1.11.0",
     "numpy>=1.24.0",
+    "pyyaml>=6.0",
+    "pytorch-lightning>=2.1.0",
+    "lmdb>=1.4.0",
+    "tqdm>=4.66.0",
+    "cvxpy>=1.4.0",
+    "cvxpylayers>=0.1.6",
+    "scikit-learn>=1.3.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
 ]
 full = [
     "transformers>=4.36.0",
     "opencv-python>=4.8.0",
+    "gudhi>=3.8.0",
+    "ripser>=0.6.4",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "pandas>=2.1.0",
 ]
 
 [tool.setuptools.packages.find]

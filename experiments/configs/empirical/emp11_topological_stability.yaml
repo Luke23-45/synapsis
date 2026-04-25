@@ -1,0 +1,13 @@
+# ─── EMP-11: Topological Stability Verification ─────────────────────────────
+# Validates Theorem 12.3 — d_B(Dgm_q(P), Dgm_q(P')) ≤ 2ε
+# under controlled perturbation max_j ||p_j - p'_j|| ≤ ε
+
+sweep:
+  epsilon_values: [0.001, 0.01, 0.05, 0.1, 0.5]
+  n_trials: 20
+  cloud_sizes: [5, 10, 20]
+  cloud_families: ["random", "circle", "line", "clusters"]
+  max_Q: 1
+
+training:
+  seeds: [42, 123, 456]

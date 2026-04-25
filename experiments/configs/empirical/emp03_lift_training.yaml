@@ -1,0 +1,36 @@
+# EMP-03: Normalized Lift Training Validation
+# Z2 Reference: §8–9 of 02_rigorous_architecture.md
+#
+# Contrastive training of W_Θ; validates that the learned lift outperforms
+# random, PCA, identity, and no-normalization ablation baselines.
+
+experiment:
+  id: "EMP-03"
+  name: "Normalized Lift Training"
+  formal_reference: "§8–9 of 02_rigorous_architecture.md"
+
+# ── Model ────────────────────────────────────────────────────────────────
+model:
+  lift_dim: 8
+  temperature: 0.1         # NT-Xent temperature
+
+# ── Data ─────────────────────────────────────────────────────────────────
+data:
+  n_train: 200              # overrides base n_train
+  n_val: 50
+  n_test: 100
+  noise_std: 0.05
+
+trajectory:
+  T: 120
+
+# ── Training ─────────────────────────────────────────────────────────────
+training:
+  full_epochs: 60
+  lr: 5.0e-3
+  batch_size: 32
+
+# ── Acceptance gates ─────────────────────────────────────────────────────
+acceptance_gates:
+  trained_vs_random_probe: 0.0    # trained > random (strict)
+  trained_vs_random_sil: 0.0      # silhouette(trained) > silhouette(random)

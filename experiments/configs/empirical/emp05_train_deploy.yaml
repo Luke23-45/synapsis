@@ -1,0 +1,41 @@
+# EMP-05: Training-Deploy Consistency Validation
+# Z2 Reference: §13 of 02_rigorous_architecture.md
+#
+# Validates the Z2 bifurcated architecture: models trained via relaxed path
+# must perform consistently when evaluated via exact deployment path.
+
+experiment:
+  id: "EMP-05"
+  name: "Train-Deploy Consistency"
+  formal_reference: "§13 of 02_rigorous_architecture.md"
+
+# ── Architecture ─────────────────────────────────────────────────────────
+architecture:
+  input_dim: 8
+  action_dim: 4
+  chunk_size: 5
+  hidden_dim: 64
+  d_model: 128
+  num_heads: 4
+  num_layers: 2
+  ffn_ratio: 4
+  dropout: 0.1
+
+# ── Data ─────────────────────────────────────────────────────────────────
+data:
+  n_episodes: 100
+
+trajectory:
+  T: 80
+
+# ── Training ─────────────────────────────────────────────────────────────
+training:
+  full_epochs: 30
+  lr: 1.0e-3
+  batch_size: 16
+  patience: 8
+
+# ── Acceptance gates ─────────────────────────────────────────────────────
+acceptance_gates:
+  max_gap_relative: 0.25          # |deploy_mse - train_mse| / train_mse < 25%
+  min_action_correlation: 0.80    # Pearson corr between train/deploy actions
