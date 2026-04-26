@@ -115,6 +115,8 @@ class TrainingConfig:
     # Logging / output
     output_dir: str = "experiments/outputs/end_to_end"
     log_interval: int = 10
+    pbar_update_interval: int = 10
+    save_checkpoints: bool = False
     save_interval: int = 50
     manifest_name: str = "run_manifest.json"
     resolved_config_name: str = "resolved_config.yaml"
@@ -464,15 +466,16 @@ def train(
             recent_grad_norms.append(grad_norm)
             batch_times_s.append(time.perf_counter() - batch_start)
 
-            # Update progress bar postfix
-            pbar.set_postfix({
-                "loss": f"{loss_dict['loss_total']:.4f}",
-                "act": f"{loss_dict['loss_action']:.4f}",
-                "spr": f"{loss_dict['loss_sparsity']:.4f}",
-                "topo": f"{loss_dict['loss_topo_reg']:.4f}",
-                "grad": f"{grad_norm:.2f}",
-                "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
-            })
+            # Update progress bar postfix at the configured interval
+            if (batch_idx + 1) % config.pbar_update_interval == 0 or (batch_idx + 1) == train_batches_per_epoch:
+                pbar.set_postfix({
+                    "loss": f"{loss_dict['loss_total']:.4f}",
+                    "act": f"{loss_dict['loss_action']:.4f}",
+                    "spr": f"{loss_dict['loss_sparsity']:.4f}",
+                    "topo": f"{loss_dict['loss_topo_reg']:.4f}",
+                    "grad": f"{grad_norm:.2f}",
+                    "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
+                })
 
             if (batch_idx + 1) % config.log_interval == 0:
                 mean_total = float(np.mean([entry["loss_total"] for entry in recent_losses]))
@@ -482,6 +485,7 @@ def train(
                 mean_grad = float(np.mean(recent_grad_norms))
                 mean_batch_time = float(np.mean(batch_times_s[-len(recent_losses):])) if recent_losses else float("nan")
                 throughput = config.batch_size / max(mean_batch_time, 1e-8)
+                pbar.clear()  # Clear progress bar before logging to prevent console overwrite
                 log.info(
                     "[Epoch %3d/%d | Batch %4d/%d] loss=%.5f | action=%.5f | sparsity=%.5f | topo=%.5f | grad=%.3f | lr=%.2e | %.2f samples/s",
                     epoch + 1,
@@ -561,20 +565,21 @@ def train(
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 patience_counter = 0
-                save_checkpoint(
-                    artifacts["best_checkpoint"],
-                    model, optimizer, scheduler, ema,
-                    CheckpointMetadata(
-                        epoch=epoch + 1,
-                        metrics=val_metrics,
-                        config=asdict(config),
-                        seed=config.seed,
-                    ),
-                    normalization={
-                        "mu": norm_stats.anchor_mu_tensor(),
-                        "sigma": norm_stats.anchor_sigma_tensor(),
-                    },
-                )
+                if config.save_checkpoints:
+                    save_checkpoint(
+                        artifacts["best_checkpoint"],
+                        model, optimizer, scheduler, ema,
+                        CheckpointMetadata(
+                            epoch=epoch + 1,
+                            metrics=val_metrics,
+                            config=asdict(config),
+                            seed=config.seed,
+                        ),
+                        normalization={
+                            "mu": norm_stats.anchor_mu_tensor(),
+                            "sigma": norm_stats.anchor_sigma_tensor(),
+                        },
+                    )
             else:
                 patience_counter += 1
                 if patience_counter >= config.early_stopping_patience:
@@ -590,7 +595,7 @@ def train(
             )
 
         # Periodic checkpoint
-        if (epoch + 1) % config.save_interval == 0:
+        if config.save_checkpoints and config.save_interval > 0 and (epoch + 1) % config.save_interval == 0:
             save_checkpoint(
                 ckpt_dir / f"epoch_{epoch + 1:04d}.pt",
                 model, optimizer, scheduler, ema,

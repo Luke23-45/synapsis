@@ -2,8 +2,8 @@
 # Inherits from default.yaml; only differences should be listed here.
 
 data:
-  train_lmdb: /content/synapsis/datasets/data/train/expert_expert_pick_place_500_episodes/expert_expert_pick_place_500_episodes.lmdb
-  val_lmdb: /content/synapsis/datasets/data/val/expert_expert_pick_place_val_50_episodes/expert_expert_pick_place_val_50_episodes.lmdb
+  train_lmdb: datasets/data/train/expert_expert_pick_place_500_episodes/expert_expert_pick_place_500_episodes.lmdb
+  val_lmdb: datasets/data/val/expert_expert_pick_place_val_50_episodes/expert_expert_pick_place_val_50_episodes.lmdb
 
 model:
   input_dim: 22

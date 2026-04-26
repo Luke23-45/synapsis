@@ -66,7 +66,7 @@ class EpisodeAwareSampler(Sampler[int]):
         rank: Optional[int] = None,
         drop_last: bool = False,
     ):
-        super().__init__(dataset)
+        super().__init__()
 
         self.dataset = dataset
         self.shuffle = shuffle

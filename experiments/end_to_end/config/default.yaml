@@ -1,6 +1,7 @@
 defaults:
   - _self_
   - ablation: baseline
+  - pick_place
 
 # Z2 end-to-end training default configuration.
 # Source of truth:
@@ -24,7 +25,7 @@ model:
   k: 8
 
 training:
-  batch_size: 16
+  batch_size: 256
   epochs: 300
   learning_rate: 3.0e-4
   weight_decay: 1.0e-4
@@ -55,8 +56,8 @@ losses:
   aux_ramp_end: 30
 
 data:
-  train_lmdb: outputs/dataset/data/val/expert_expert_pick_place_val_50_episodes/expert_expert_pick_place_val_50_episodes.lmdb
-  val_lmdb: outputs/dataset/data/val/expert_expert_pick_place_val_50_episodes/expert_expert_pick_place_val_50_episodes.lmdb
+  train_lmdb: ???
+  val_lmdb: ???
   split_seed: 42
   normalize_states: true
   normalize_actions: false
@@ -76,6 +77,8 @@ logging:
   output_dir: experiments/outputs/end_to_end
   seed: 42
   log_interval: 10
+  pbar_update_interval: 10
+  save_checkpoints: false
   save_best: true
   save_interval: 50
   manifest_name: run_manifest.json
