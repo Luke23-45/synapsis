@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from types import SimpleNamespace
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
@@ -28,10 +29,12 @@ from src.core.normalization import compute_normalization_stats
 from src.data.dataset import (
     split_episodes,
     create_dataloaders,
+    _effective_num_workers,
 )
 from src.engine.train import Trainer
 from src.engine.evaluate import Evaluator
 from src.engine.rollout import rollout_evaluate, aggregate_rollout_results
+from experiments.end_to_end.losses.auxiliary_losses import sparsity_loss, topology_reg_loss
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +111,80 @@ def _attach_synapse_features(episodes, config, norm_stats):
 # ---------------------------------------------------------------------------
 
 class TestTrainingSmoke:
+    def test_effective_num_workers_caps_requested_value(self):
+        capped = _effective_num_workers(10_000)
+        assert capped >= 0
+        assert capped <= 10_000
+
+    def test_synapse_loss_reports_raw_aux_losses_before_ramp(self, tmp_path):
+        trainer = Trainer.__new__(Trainer)
+        trainer.state = SimpleNamespace(epoch=0)
+        trainer.loss_config = SimpleNamespace(
+            action_weight=1.0,
+            sparsity_weight=0.01,
+            topology_reg_weight=0.001,
+            action_beta=0.5,
+            aux_ramp_start=10,
+            aux_ramp_end=30,
+        )
+
+        pred_outputs = SimpleNamespace(
+            pred_actions=torch.tensor([[[0.1, -0.2], [0.0, 0.3]]], dtype=torch.float32),
+            y_star=torch.tensor([[0.0, 0.5, 0.25, 0.0]], dtype=torch.float32),
+            topology_token=torch.tensor([[0.0, 0.0], [2.0, 0.0]], dtype=torch.float32),
+        )
+        target_actions = torch.zeros_like(pred_outputs.pred_actions)
+
+        total_loss, loss_dict = Trainer._synapse_loss(trainer, pred_outputs, target_actions)
+
+        expected_action = torch.nn.functional.mse_loss(pred_outputs.pred_actions, target_actions)
+        expected_sparse = sparsity_loss(pred_outputs.y_star)
+        expected_topo = topology_reg_loss(pred_outputs.topology_token)
+
+        assert torch.isclose(loss_dict["action_mse"], expected_action)
+        assert torch.isclose(loss_dict["sparsity_loss"], expected_sparse)
+        assert torch.isclose(loss_dict["topo_loss"], expected_topo)
+        assert float(loss_dict["alpha_sparsity"].item()) == 0.0
+        assert float(loss_dict["alpha_topo"].item()) == 0.0
+        assert torch.isclose(loss_dict["weighted_sparsity_loss"], torch.tensor(0.0))
+        assert torch.isclose(loss_dict["weighted_topo_loss"], torch.tensor(0.0))
+        assert torch.isclose(total_loss, expected_action)
+
+    def test_trainer_uses_aux_schedule_from_config(self, tmp_path):
+        config = _smoke_config(Condition.B_SYNAPSE)
+        config = ExperimentConfig(
+            condition=config.condition,
+            seed=config.seed,
+            synapse=config.synapse,
+            transformer=config.transformer,
+            data=config.data,
+            stats=config.stats,
+            training=TrainingParams(
+                max_epochs=1,
+                batch_size=2,
+                learning_rate=1e-3,
+                warmup_steps=1,
+                early_stopping_patience=1,
+                num_workers=0,
+                use_amp=False,
+                sparsity_weight=0.2,
+                topology_reg_weight=0.05,
+                aux_ramp_start=0,
+                aux_ramp_end=1,
+            ),
+        )
+        train_eps, val_eps, test_eps, norm_stats = _prepare_data(config)
+        train_loader, val_loader, _ = create_dataloaders(
+            train_eps, val_eps, test_eps, config, norm_stats
+        )
+
+        trainer = Trainer(config, train_loader, val_loader, tmp_path)
+
+        assert trainer.loss_config.sparsity_weight == 0.2
+        assert trainer.loss_config.topology_reg_weight == 0.05
+        assert trainer.loss_config.aux_ramp_start == 0
+        assert trainer.loss_config.aux_ramp_end == 1
+
     @pytest.mark.parametrize("condition", [
         Condition.A1_RECENT, Condition.A2_UNIFORM, Condition.B_SYNAPSE,
     ])

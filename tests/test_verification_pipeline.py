@@ -219,6 +219,64 @@ def test_solver_failure_propagates_runtime_error(monkeypatch: pytest.MonkeyPatch
         )
 
 
+def test_scipy_solver_produces_feasible_solution():
+    y_star = anchor_selector.solve_relaxed_selector(
+        np.array([0.0, 0.4, 0.7, 0.2], dtype=np.float64),
+        K=2,
+        r=1,
+        lam=0.5,
+        solver="scipy",
+    )
+
+    assert y_star.shape == (4,)
+    assert np.all(np.isfinite(y_star))
+    assert y_star[0] == 0.0
+    assert np.all((0.0 <= y_star) & (y_star <= 1.0))
+    assert y_star.sum() <= 2.0 + 1e-6
+    assert y_star[1] + y_star[2] <= 1.0 + 1e-6
+    assert y_star[2] + y_star[3] <= 1.0 + 1e-6
+
+
+def test_osqp_path_uses_scipy_when_cvxpy_fallback_fails(monkeypatch: pytest.MonkeyPatch):
+    class _FakeInfo:
+        status_val = 7
+        status = "maximum iterations reached"
+
+    class _FakeResult:
+        info = _FakeInfo()
+
+    class _FakeProb:
+        def setup(self, *args, **kwargs):
+            return None
+
+        def update(self, **kwargs):
+            return None
+
+        def solve(self):
+            return _FakeResult()
+
+    class _FakeOSQPModule:
+        class OSQP(_FakeProb):
+            pass
+
+    def _cvxpy_boom(*args, **kwargs):
+        raise RuntimeError("cvxpy user_limit")
+
+    monkeypatch.setitem(sys.modules, "osqp", _FakeOSQPModule())
+    monkeypatch.setattr(anchor_selector, "_solve_cvxpy", _cvxpy_boom)
+
+    y_star = anchor_selector.solve_relaxed_selector(
+        np.array([0.0, 0.4, 0.7, 0.2], dtype=np.float64),
+        K=2,
+        r=1,
+        lam=0.5,
+        solver="osqp",
+    )
+
+    assert y_star.shape == (4,)
+    assert np.all(np.isfinite(y_star))
+
+
 def test_compute_memory_respects_budget_under_extreme_refractory():
     trajectory = _trajectory(steps=14, dims=5)
     state = compute_memory(

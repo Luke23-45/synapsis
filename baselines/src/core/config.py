@@ -123,6 +123,12 @@ class TrainingParams:
     compile_model: bool = False
     fused_adamw: bool = True
     save_checkpoints: bool = False
+    action_loss_weight: float = 1.0
+    sparsity_weight: float = 0.01
+    topology_reg_weight: float = 0.001
+    action_beta: float = 0.5
+    aux_ramp_start: int = 10
+    aux_ramp_end: int = 30
 
 
 @dataclass(frozen=True)
@@ -285,6 +291,12 @@ class ExperimentConfig:
                 compile_model=self.training.compile_model,
                 fused_adamw=self.training.fused_adamw,
                 save_checkpoints=self.training.save_checkpoints,
+                action_loss_weight=self.training.action_loss_weight,
+                sparsity_weight=self.training.sparsity_weight,
+                topology_reg_weight=self.training.topology_reg_weight,
+                action_beta=self.training.action_beta,
+                aux_ramp_start=self.training.aux_ramp_start,
+                aux_ramp_end=self.training.aux_ramp_end,
             )
 
         return ExperimentConfig(

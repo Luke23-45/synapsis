@@ -405,6 +405,12 @@ def solve_relaxed_selector(
         y_star[y_star < _SOLVER_ZERO_TOL] = 0.0
         return y_star
 
+    # y[0] is fixed to 0 by construction, so its saliency must not leak into
+    # the linear term. Keeping a large first-step score here is mathematically
+    # irrelevant but can destabilize downstream solvers numerically.
+    saliency = saliency.copy()
+    saliency[0] = 0.0
+
     # Build QP: minimize ½ yᵀPy + qᵀy
     P = 2.0 * lam * np.eye(T, dtype=np.float64)
     q = -saliency.astype(np.float64)
@@ -449,6 +455,7 @@ def solve_relaxed_selector(
     # and prevents spurious entries in the positive support used by hard_projection.
     y_star[y_star < _SOLVER_ZERO_TOL] = 0.0
 
+    y_star[0] = 0.0
     return y_star
 
 
@@ -468,8 +475,12 @@ def _solve_osqp(
     try:
         import osqp
     except ImportError:
-        warnings.warn("osqp not installed, falling back to cvxpy", RuntimeWarning)
-        return _solve_cvxpy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+        warnings.warn("osqp not installed, falling back to scipy", RuntimeWarning)
+        try:
+            return _solve_scipy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+        except RuntimeError:
+            warnings.warn("scipy fallback failed; falling back to cvxpy", RuntimeWarning)
+            return _solve_cvxpy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
 
     global _osqp_cache
     # Cache key based on the problem dimensions (T) and constraints
@@ -521,10 +532,14 @@ def _solve_osqp(
     if res.info.status_val not in (1, 2):  # 1 = solved, 2 = solved inaccurate
         warnings.warn(
             f"OSQP solver failed with status: {res.info.status}. "
-            f"Falling back to cvxpy.",
+            f"Falling back to scipy.",
             RuntimeWarning
         )
-        return _solve_cvxpy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+        try:
+            return _solve_scipy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+        except RuntimeError:
+            warnings.warn("scipy fallback failed; falling back to cvxpy", RuntimeWarning)
+            return _solve_cvxpy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
 
     return res.x.astype(np.float64)
 
@@ -586,6 +601,79 @@ def _solve_cvxpy(
         return np.clip(y.value, 0.0, 1.0).astype(np.float64)
     except Exception as e:
         raise RuntimeError(f"CVXPY fallback solver failed: {e}")
+
+
+def _solve_scipy(
+    P: np.ndarray,
+    q: np.ndarray,
+    A_ub: np.ndarray,
+    b_ub: np.ndarray,
+    A_eq: np.ndarray,
+    b_eq: np.ndarray,
+    bounds: list,
+    T: int,
+) -> np.ndarray:
+    """Solve the selector QP with SciPy as a robust fallback."""
+    try:
+        from scipy.optimize import Bounds, LinearConstraint, minimize
+    except ImportError as e:
+        raise RuntimeError(
+            "SciPy is required for the relaxed-selector fallback but is not installed."
+        ) from e
+
+    def objective(y: np.ndarray) -> float:
+        return 0.5 * float(y @ P @ y) + float(q @ y)
+
+    def gradient(y: np.ndarray) -> np.ndarray:
+        return (P @ y) + q
+
+    constraints = []
+    if A_ub.size > 0:
+        constraints.append(
+            LinearConstraint(A_ub, -np.inf * np.ones_like(b_ub), b_ub)
+        )
+    if A_eq.size > 0:
+        constraints.append(LinearConstraint(A_eq, b_eq, b_eq))
+
+    lower = np.array([b[0] for b in bounds], dtype=np.float64)
+    upper = np.array([b[1] for b in bounds], dtype=np.float64)
+    scipy_bounds = Bounds(lower, upper)
+
+    y0 = np.clip(-q / np.diag(P), lower, upper)
+    if A_eq.size > 0:
+        y0[0] = b_eq[0]
+    if A_ub.size > 0:
+        budget = float(y0.sum())
+        if budget > b_ub[0]:
+            y0 *= float(b_ub[0] / max(budget, 1e-12))
+            if A_eq.size > 0:
+                y0[0] = b_eq[0]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        result = minimize(
+            objective,
+            y0,
+            method="SLSQP",
+            jac=gradient,
+            bounds=scipy_bounds,
+            constraints=constraints,
+            options={
+                "maxiter": 1000,
+                "ftol": 1e-9,
+                "disp": False,
+            },
+        )
+
+    if not result.success:
+        raise RuntimeError(
+            f"SciPy solver failed: {result.message}"
+        )
+
+    y_star = np.clip(np.asarray(result.x, dtype=np.float64), 0.0, 1.0)
+    if A_eq.size > 0:
+        y_star[0] = b_eq[0]
+    return y_star
 
 
 # =======================================================================

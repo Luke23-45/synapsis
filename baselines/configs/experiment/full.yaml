@@ -38,6 +38,12 @@ training:
   gradient_clip_norm: 1.0
   use_amp: true
   num_workers: 4
+  action_loss_weight: 1.0
+  sparsity_weight: 0.01
+  topology_reg_weight: 0.001
+  action_beta: 0.5
+  aux_ramp_start: 10
+  aux_ramp_end: 30
 
 data:
   proprio_dim: 14            # Largest across datasets (ALOHA)

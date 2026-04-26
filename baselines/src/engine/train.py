@@ -180,10 +180,16 @@ class Trainer:
         # Training state
         self.state = TrainState()
 
-        # Loss weights
-        self.action_loss_weight = 1.0
-        self.phase_loss_weight = 0.1  # Auxiliary task
-        self.loss_config = LossConfig()
+        # Auxiliary-loss schedule is part of the experiment config, not a
+        # hidden trainer default, so logs and optimization stay reproducible.
+        self.loss_config = LossConfig(
+            action_weight=config.training.action_loss_weight,
+            sparsity_weight=config.training.sparsity_weight,
+            topology_reg_weight=config.training.topology_reg_weight,
+            action_beta=config.training.action_beta,
+            aux_ramp_start=config.training.aux_ramp_start,
+            aux_ramp_end=config.training.aux_ramp_end,
+        )
 
     def _initialize_synapse_normalization(self) -> None:
         if not self.config.condition.uses_synapse:
@@ -233,20 +239,22 @@ class Trainer:
             self.loss_config.aux_ramp_start,
             self.loss_config.aux_ramp_end,
         )
-        
-        loss_dict = {"action_mse": action_mse}
-        total_loss = action_mse
-        
-        if alpha_sparsity > 0.0:
-            s_loss = sparsity_loss(pred_outputs.y_star)
-            loss_dict["sparsity_loss"] = s_loss
-            total_loss = total_loss + alpha_sparsity * s_loss
-            
-        if alpha_topo > 0.0:
-            t_loss = topology_reg_loss(pred_outputs.topology_token)
-            loss_dict["topo_loss"] = t_loss
-            total_loss = total_loss + alpha_topo * t_loss
-            
+        s_loss = sparsity_loss(pred_outputs.y_star)
+        t_loss = topology_reg_loss(pred_outputs.topology_token)
+        weighted_s_loss = s_loss * alpha_sparsity
+        weighted_t_loss = t_loss * alpha_topo
+
+        loss_dict = {
+            "action_mse": action_mse,
+            "sparsity_loss": s_loss,
+            "topo_loss": t_loss,
+            "weighted_sparsity_loss": weighted_s_loss,
+            "weighted_topo_loss": weighted_t_loss,
+            "alpha_sparsity": torch.tensor(alpha_sparsity, device=action_mse.device),
+            "alpha_topo": torch.tensor(alpha_topo, device=action_mse.device),
+        }
+        total_loss = action_mse + weighted_s_loss + weighted_t_loss
+
         return total_loss, loss_dict
 
     def train_epoch(self) -> Dict[str, float]:
@@ -261,6 +269,8 @@ class Trainer:
         total_action_mse = 0.0
         total_sparsity_loss = 0.0
         total_topo_loss = 0.0
+        total_weighted_sparsity_loss = 0.0
+        total_weighted_topo_loss = 0.0
         total_phase_correct = 0
         total_phase_total = 0
         n_batches = 0
@@ -294,14 +304,22 @@ class Trainer:
                         batch["action_chunk"],
                     )
                     action_loss = loss_dict["action_mse"]
-                    sparsity_val = loss_dict.get("sparsity_loss", torch.tensor(0.0, device=self.device))
-                    topo_val = loss_dict.get("topo_loss", torch.tensor(0.0, device=self.device))
+                    sparsity_val = loss_dict["sparsity_loss"]
+                    topo_val = loss_dict["topo_loss"]
+                    weighted_sparsity_val = loss_dict["weighted_sparsity_loss"]
+                    weighted_topo_val = loss_dict["weighted_topo_loss"]
+                    alpha_sparsity = float(loss_dict["alpha_sparsity"].item())
+                    alpha_topo = float(loss_dict["alpha_topo"].item())
                 else:
                     pred_actions = self.model(batch)
                     action_loss = F.mse_loss(pred_actions, batch["action_chunk"])
-                    total_loss_val = self.action_loss_weight * action_loss
+                    total_loss_val = self.loss_config.action_weight * action_loss
                     sparsity_val = torch.tensor(0.0, device=self.device)
                     topo_val = torch.tensor(0.0, device=self.device)
+                    weighted_sparsity_val = torch.tensor(0.0, device=self.device)
+                    weighted_topo_val = torch.tensor(0.0, device=self.device)
+                    alpha_sparsity = 0.0
+                    alpha_topo = 0.0
 
             self.scaler.scale(total_loss_val).backward()
             
@@ -326,6 +344,8 @@ class Trainer:
             total_action_mse += action_loss.item()
             total_sparsity_loss += sparsity_val.item()
             total_topo_loss += topo_val.item()
+            total_weighted_sparsity_loss += weighted_sparsity_val.item()
+            total_weighted_topo_loss += weighted_topo_val.item()
             n_batches += 1
             batch_times_s.append(time.perf_counter() - batch_start)
             samples_seen += batch["proprio"].shape[0]
@@ -339,6 +359,8 @@ class Trainer:
                 if self.config.condition.uses_synapse:
                     postfix["sparse"] = f"{sparsity_val.item():.4f}"
                     postfix["topo"] = f"{topo_val.item():.4f}"
+                    postfix["a_s"] = f"{alpha_sparsity:.3f}"
+                    postfix["a_t"] = f"{alpha_topo:.3f}"
                 postfix["grad"] = f"{grad_norm:.2f}"
                 postfix["lr"] = f"{self.optimizer.param_groups[0]['lr']:.2e}"
                 pbar.set_postfix(postfix)
@@ -349,6 +371,8 @@ class Trainer:
         avg_mse = total_action_mse / max(1, n_batches)
         avg_sparsity = total_sparsity_loss / max(1, n_batches)
         avg_topo = total_topo_loss / max(1, n_batches)
+        avg_weighted_sparsity = total_weighted_sparsity_loss / max(1, n_batches)
+        avg_weighted_topo = total_weighted_topo_loss / max(1, n_batches)
         current_lr = self.optimizer.param_groups[0]["lr"]
         mean_batch_time = sum(batch_times_s) / max(1, len(batch_times_s))
         samples_per_second = samples_seen / max(1e-6, sum(batch_times_s))
@@ -360,6 +384,20 @@ class Trainer:
             "action_mse": avg_mse,
             "sparsity_loss": avg_sparsity,
             "topo_loss": avg_topo,
+            "weighted_sparsity_loss": avg_weighted_sparsity,
+            "weighted_topo_loss": avg_weighted_topo,
+            "alpha_sparsity": _aux_weight_schedule(
+                self.state.epoch,
+                self.loss_config.sparsity_weight,
+                self.loss_config.aux_ramp_start,
+                self.loss_config.aux_ramp_end,
+            ),
+            "alpha_topo": _aux_weight_schedule(
+                self.state.epoch,
+                self.loss_config.topology_reg_weight,
+                self.loss_config.aux_ramp_start,
+                self.loss_config.aux_ramp_end,
+            ),
             "lr": current_lr,
             "samples_per_second": samples_per_second,
             "mean_batch_time": mean_batch_time,
@@ -441,6 +479,10 @@ class Trainer:
                 log_msg += (
                     f" | train_sparse={train_metrics['sparsity_loss']:.6f} "
                     f"| train_topo={train_metrics['topo_loss']:.6f}"
+                    f" | alpha_sparse={train_metrics['alpha_sparsity']:.6f}"
+                    f" | alpha_topo={train_metrics['alpha_topo']:.6f}"
+                    f" | sparse_contrib={train_metrics['weighted_sparsity_loss']:.6f}"
+                    f" | topo_contrib={train_metrics['weighted_topo_loss']:.6f}"
                 )
             log_msg += f" | lr={train_metrics['lr']:.2e} | {train_metrics['samples_per_second']:.1f} samples/s"
             

@@ -12,6 +12,7 @@ via the LeRobot adapter layer.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -23,6 +24,24 @@ from src.core.normalization import NormalizationStats
 
 # Import the unified RobotEpisode from adapters (single source of truth)
 from src.data.adapters.base_adapter import RobotEpisode
+
+log = logging.getLogger(__name__)
+
+
+def _effective_num_workers(requested: int) -> int:
+    """Cap worker count to the runtime's visible CPU budget."""
+    if requested <= 0:
+        return 0
+
+    visible_cpus = os.cpu_count() or requested
+    if hasattr(os, "sched_getaffinity"):
+        try:
+            visible_cpus = len(os.sched_getaffinity(0))
+        except OSError:
+            pass
+
+    return max(0, min(requested, visible_cpus))
+
 
 class BaselineEpisodeAwareSampler(Sampler[int]):
     """
@@ -70,8 +89,6 @@ class BaselineEpisodeAwareSampler(Sampler[int]):
 
     def __len__(self):
         return len(self.dataset._index)
-
-log = logging.getLogger(__name__)
 
 
 class RoboticsDataset(Dataset):
@@ -369,12 +386,20 @@ def create_dataloaders(
         test_eps, config, norm_stats, action_norm_stats=action_norm_stats, split="test"
     )
 
+    effective_num_workers = _effective_num_workers(config.training.num_workers)
+    if effective_num_workers != config.training.num_workers:
+        log.info(
+            "Reducing DataLoader workers from %d to %d based on runtime CPU availability",
+            config.training.num_workers,
+            effective_num_workers,
+        )
+
     loader_kwargs = {
-        "num_workers": config.training.num_workers,
+        "num_workers": effective_num_workers,
         "collate_fn": collate_fn,
         "pin_memory": config.training.pin_memory,
     }
-    if config.training.num_workers > 0:
+    if effective_num_workers > 0:
         loader_kwargs["persistent_workers"] = config.training.persistent_workers
         loader_kwargs["prefetch_factor"] = config.training.prefetch_factor
 
