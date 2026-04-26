@@ -81,6 +81,17 @@ def _aux_weight_schedule(
     return target_weight * progress
 
 
+def _resolve_aux_schedule(
+    primary_start: int | None,
+    primary_end: int | None,
+    fallback_start: int,
+    fallback_end: int,
+) -> tuple[int, int]:
+    start = fallback_start if primary_start is None else primary_start
+    end = fallback_end if primary_end is None else primary_end
+    return start, end
+
+
 # ---------------------------------------------------------------------------
 # Training state
 # ---------------------------------------------------------------------------
@@ -190,6 +201,18 @@ class Trainer:
             aux_ramp_start=config.training.aux_ramp_start,
             aux_ramp_end=config.training.aux_ramp_end,
         )
+        self.sparsity_ramp_start, self.sparsity_ramp_end = _resolve_aux_schedule(
+            config.training.sparsity_ramp_start,
+            config.training.sparsity_ramp_end,
+            config.training.aux_ramp_start,
+            config.training.aux_ramp_end,
+        )
+        self.topology_ramp_start, self.topology_ramp_end = _resolve_aux_schedule(
+            config.training.topology_ramp_start,
+            config.training.topology_ramp_end,
+            config.training.aux_ramp_start,
+            config.training.aux_ramp_end,
+        )
 
     def _initialize_synapse_normalization(self) -> None:
         if not self.config.condition.uses_synapse:
@@ -230,14 +253,14 @@ class Trainer:
         alpha_sparsity = _aux_weight_schedule(
             self.state.epoch,
             self.loss_config.sparsity_weight,
-            self.loss_config.aux_ramp_start,
-            self.loss_config.aux_ramp_end,
+            self.sparsity_ramp_start,
+            self.sparsity_ramp_end,
         )
         alpha_topo = _aux_weight_schedule(
             self.state.epoch,
             self.loss_config.topology_reg_weight,
-            self.loss_config.aux_ramp_start,
-            self.loss_config.aux_ramp_end,
+            self.topology_ramp_start,
+            self.topology_ramp_end,
         )
         s_loss = sparsity_loss(pred_outputs.y_star)
         t_loss = topology_reg_loss(pred_outputs.topology_token)
@@ -389,14 +412,14 @@ class Trainer:
             "alpha_sparsity": _aux_weight_schedule(
                 self.state.epoch,
                 self.loss_config.sparsity_weight,
-                self.loss_config.aux_ramp_start,
-                self.loss_config.aux_ramp_end,
+                self.sparsity_ramp_start,
+                self.sparsity_ramp_end,
             ),
             "alpha_topo": _aux_weight_schedule(
                 self.state.epoch,
                 self.loss_config.topology_reg_weight,
-                self.loss_config.aux_ramp_start,
-                self.loss_config.aux_ramp_end,
+                self.topology_ramp_start,
+                self.topology_ramp_end,
             ),
             "lr": current_lr,
             "samples_per_second": samples_per_second,

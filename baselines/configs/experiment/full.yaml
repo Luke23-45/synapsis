@@ -44,6 +44,10 @@ training:
   action_beta: 0.5
   aux_ramp_start: 10
   aux_ramp_end: 30
+  sparsity_ramp_start: 10
+  sparsity_ramp_end: 30
+  topology_ramp_start: 0
+  topology_ramp_end: 10
 
 data:
   proprio_dim: 14            # Largest across datasets (ALOHA)

@@ -127,6 +127,10 @@ class TestTrainingSmoke:
             aux_ramp_start=10,
             aux_ramp_end=30,
         )
+        trainer.sparsity_ramp_start = 10
+        trainer.sparsity_ramp_end = 30
+        trainer.topology_ramp_start = 10
+        trainer.topology_ramp_end = 30
 
         pred_outputs = SimpleNamespace(
             pred_actions=torch.tensor([[[0.1, -0.2], [0.0, 0.3]]], dtype=torch.float32),
@@ -171,6 +175,10 @@ class TestTrainingSmoke:
                 topology_reg_weight=0.05,
                 aux_ramp_start=0,
                 aux_ramp_end=1,
+                sparsity_ramp_start=2,
+                sparsity_ramp_end=3,
+                topology_ramp_start=0,
+                topology_ramp_end=1,
             ),
         )
         train_eps, val_eps, test_eps, norm_stats = _prepare_data(config)
@@ -184,6 +192,10 @@ class TestTrainingSmoke:
         assert trainer.loss_config.topology_reg_weight == 0.05
         assert trainer.loss_config.aux_ramp_start == 0
         assert trainer.loss_config.aux_ramp_end == 1
+        assert trainer.sparsity_ramp_start == 2
+        assert trainer.sparsity_ramp_end == 3
+        assert trainer.topology_ramp_start == 0
+        assert trainer.topology_ramp_end == 1
 
     @pytest.mark.parametrize("condition", [
         Condition.A1_RECENT, Condition.A2_UNIFORM, Condition.B_SYNAPSE,

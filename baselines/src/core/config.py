@@ -129,6 +129,10 @@ class TrainingParams:
     action_beta: float = 0.5
     aux_ramp_start: int = 10
     aux_ramp_end: int = 30
+    sparsity_ramp_start: Optional[int] = None
+    sparsity_ramp_end: Optional[int] = None
+    topology_ramp_start: Optional[int] = None
+    topology_ramp_end: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -297,6 +301,10 @@ class ExperimentConfig:
                 action_beta=self.training.action_beta,
                 aux_ramp_start=self.training.aux_ramp_start,
                 aux_ramp_end=self.training.aux_ramp_end,
+                sparsity_ramp_start=self.training.sparsity_ramp_start,
+                sparsity_ramp_end=self.training.sparsity_ramp_end,
+                topology_ramp_start=self.training.topology_ramp_start,
+                topology_ramp_end=self.training.topology_ramp_end,
             )
 
         return ExperimentConfig(

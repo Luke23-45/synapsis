@@ -10,6 +10,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from synapse_arch.model import SynapseArchitectureConfig, SynapseEndToEndModel
+from synapse_arch.saliency_normalizer import SaliencyNormalizer
+from synapse_arch.topology_branch import TopologyBranch
 from synapse_core.anchor_selector import hard_projection as core_hard_projection
 
 
@@ -79,3 +81,25 @@ def test_train_deploy_interfaces_are_separate():
     assert hasattr(train_out, "y_star")
     assert hasattr(deploy_out, "exact_memory_states")
     assert deploy_out.exact_memory_states[0].anchor_indices == sorted(deploy_out.exact_memory_states[0].anchor_indices)
+
+
+def test_saliency_normalizer_outputs_nonnegative_saliency_after_first_step():
+    normalizer = SaliencyNormalizer()
+    event_scores = torch.tensor([[-0.5, -0.25, 0.0, 0.75, 1.5]], dtype=torch.float32)
+    saliency = normalizer(event_scores)
+
+    assert saliency.shape == event_scores.shape
+    assert saliency[0, 0] < -1e8
+    assert torch.all(saliency[:, 1:] >= 0.0)
+
+
+def test_topology_surrogate_respects_zero_activations():
+    branch = TopologyBranch(lift_dim=4, summary_dim=8, hidden_dim=6)
+    lifted = torch.randn(2, 5, 4)
+    activations = torch.zeros(2, 5)
+
+    topo = branch.surrogate(lifted, activations)
+
+    assert topo.shape == (2, 6)
+    assert torch.all(torch.isfinite(topo))
+    assert torch.allclose(topo[0], topo[1], atol=1e-6)

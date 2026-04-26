@@ -46,20 +46,24 @@ class TopologyBranch(nn.Module):
     def surrogate(self, lifted_tokens: torch.Tensor, activations: torch.Tensor) -> torch.Tensor:
         weights = activations.unsqueeze(-1)
         weighted = lifted_tokens * weights
-        # FIX: Clamping denom to 1.0 instead of 1e-6 prevents gradient explosion
-        # when the selector outputs highly sparse activations (sum < 1.0).
-        denom = weights.sum(dim=1, keepdim=True).clamp_min(1.0)
-        centroid = weighted.sum(dim=1) / denom.squeeze(1)
+        # Clamping denom prevents division blowups for highly sparse selectors,
+        # while still driving the summary toward zero when no anchors are active.
+        mass = activations.sum(dim=1, keepdim=True)
+        denom = mass.clamp_min(1.0)
+        centroid = weighted.sum(dim=1) / denom
         diffs = lifted_tokens - centroid.unsqueeze(1)
         pairwise = torch.cdist(lifted_tokens, lifted_tokens)
-        weighted_pairwise = pairwise * torch.matmul(activations.unsqueeze(-1), activations.unsqueeze(1))
+        pair_weights = torch.matmul(activations.unsqueeze(-1), activations.unsqueeze(1))
+        weighted_pairwise = pairwise * pair_weights
         tri_mask = torch.triu(torch.ones_like(weighted_pairwise), diagonal=1)
         tri = weighted_pairwise * tri_mask
-        num_pairs = tri_mask.sum(dim=(1, 2)).clamp_min(1.0)
-        mean_pair = tri.sum(dim=(1, 2)) / num_pairs
+        pair_mass = (pair_weights * tri_mask).sum(dim=(1, 2)).clamp_min(1.0)
+        mean_pair = tri.sum(dim=(1, 2)) / pair_mass
         max_pair = tri.amax(dim=(1, 2))
-        mean_disp = diffs.norm(dim=-1).mean(dim=1)
-        max_disp = diffs.norm(dim=-1).amax(dim=1)
+        disp = diffs.norm(dim=-1)
+        weighted_disp = disp * activations
+        mean_disp = weighted_disp.sum(dim=1) / denom.squeeze(1)
+        max_disp = weighted_disp.amax(dim=1)
         summary = torch.stack([mean_pair, max_pair, mean_disp, max_disp], dim=-1)
         if self.summary_dim > 4:
             repeats = self.summary_dim // 4

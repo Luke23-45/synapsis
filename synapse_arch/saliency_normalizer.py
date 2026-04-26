@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 
@@ -27,7 +28,10 @@ class SaliencyNormalizer(nn.Module):
         z = (event_scores - mean) / std
         temp = torch.exp(self.log_temperature).clamp(min=0.25, max=4.0)
         
-        out = torch.sigmoid(z / temp) * event_scores
+        # Saliency must be non-negative for the relaxed selector. Raw event
+        # logits can be negative, so convert magnitude with softplus and gate
+        # it by the causal z-score confidence.
+        out = torch.sigmoid(z / temp) * F.softplus(event_scores)
         out = out.clone()
         out = out.masked_fill(~padding_mask, 0.0)
         out[:, 0] = -1e9  # Mask applied safely after normalization
