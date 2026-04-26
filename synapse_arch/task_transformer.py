@@ -20,9 +20,20 @@ class TaskTransformer(nn.Module):
         )
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers, enable_nested_tensor=False)
 
-    def forward(self, tokens: torch.Tensor, key_padding_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, key_padding_mask: torch.Tensor | None = None, pos_indices: torch.Tensor | None = None) -> torch.Tensor:
         steps = tokens.shape[1]
-        if steps > self.max_tokens:
-            raise ValueError(f"Token sequence length {steps} exceeds max_tokens {self.max_tokens}")
-        encoded = tokens + self.pos_embed[:, :steps, :]
+        
+        if pos_indices is not None:
+            # pos_indices: (batch, seq_len)
+            batch_size = tokens.shape[0]
+            pos_expanded = self.pos_embed.expand(batch_size, -1, -1)
+            # Gather positional embeddings based on indices
+            # pos_indices shape: (batch_size, seq_len, 1) -> expanded to (batch_size, seq_len, d_model)
+            pos = torch.gather(pos_expanded, 1, pos_indices.unsqueeze(-1).expand(-1, -1, self.pos_embed.shape[-1]))
+            encoded = tokens + pos
+        else:
+            if steps > self.max_tokens:
+                raise ValueError(f"Token sequence length {steps} exceeds max_tokens {self.max_tokens}")
+            encoded = tokens + self.pos_embed[:, :steps, :]
+            
         return self.encoder(encoded, src_key_padding_mask=key_padding_mask)

@@ -47,6 +47,8 @@ def _extract_all_features(
     trajectory: np.ndarray,
     K: int, r: int, lam: float, k: int, Q: int,
     W_Theta: np.ndarray,
+    mu: Optional[np.ndarray] = None,
+    sigma: Optional[np.ndarray] = None,
 ) -> Dict[str, np.ndarray]:
     """
     Extract 5 feature sets from Z2 memory operator output:
@@ -56,11 +58,14 @@ def _extract_all_features(
     state = compute_memory(
         traj_f64, K=K, r=r, lam=lam,
         W_Theta=W_Theta, Q=Q, solver="osqp",
+        mu=mu, sigma=sigma,
     )
     cloud = state.point_cloud
     cloud_feat = cloud_geometry_summary(cloud)
     topo_feat = summarize_diagrams(state.persistence_diagrams)
-    combined_feat = np.concatenate([cloud_feat, topo_feat])
+    # H_0 features (first 4) are redundant with cloud_feat distances.
+    # We append only the H_1 features (last 4) to provide strictly non-redundant topology.
+    combined_feat = np.concatenate([cloud_feat, topo_feat[4:]])
     proxy_feat = proxy_topology_features(trajectory, k)
     cloud_proxy_feat = np.concatenate([cloud_feat, proxy_feat])
 
@@ -105,14 +110,31 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     all_samples = generate_topology_dataset(rng, n_total, T, d, noise_std)
     D = d + 3
     W_Theta = make_orthogonal_W(k, D, rng)
-
-    # Split
+    
+    # Downweight time (col 0) and metadata (cols d+1, d+2) to prevent
+    # the monotonically increasing time coordinate from unrolling 
+    # the state-space loops into unclosed helices.
+    W_Theta[:, 0] *= 0.01
+    W_Theta[:, d+1:] *= 0.01
     n = len(all_samples)
     perm = rng.permutation(n)
     n_train = cfg.data.n_train
     n_val = cfg.data.n_val
     train_samples = [all_samples[i] for i in perm[:n_train]]
     test_samples = [all_samples[i] for i in perm[n_train + n_val:]]
+
+    # Compute global normalization statistics from train samples
+    all_V = []
+    for sample in train_samples:
+        state = compute_memory(sample.sequence.astype(np.float64), K, r, lam, W_Theta, Q, solver="osqp")
+        all_V.append(state.V)
+    if len(all_V) > 0:
+        V_concat = np.concatenate(all_V, axis=0)
+        global_mu = np.mean(V_concat, axis=0)
+        global_sigma = np.ones_like(global_mu)
+    else:
+        global_mu = None
+        global_sigma = None
 
     feature_sets = ["cloud_only", "topo_only", "cloud_topo", "proxy_only", "cloud_proxy"]
     results: Dict[str, float] = {}
@@ -121,12 +143,12 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     test_features: Dict[str, List[np.ndarray]] = {fs: [] for fs in feature_sets}
 
     for sample in train_samples:
-        feats = _extract_all_features(sample.sequence, K, r, lam, k, Q, W_Theta)
+        feats = _extract_all_features(sample.sequence, K, r, lam, k, Q, W_Theta, global_mu, global_sigma)
         for fs in feature_sets:
             train_features[fs].append(feats[fs])
 
     for sample in test_samples:
-        feats = _extract_all_features(sample.sequence, K, r, lam, k, Q, W_Theta)
+        feats = _extract_all_features(sample.sequence, K, r, lam, k, Q, W_Theta, global_mu, global_sigma)
         for fs in feature_sets:
             test_features[fs].append(feats[fs])
 

@@ -70,15 +70,16 @@ def generate_event_detection_dataset(
 
 # ── Custom Weighted Loss ───────────────────────────────────────────────────
 
-class WeightedMSELoss(nn.Module):
-    """MSE Loss with higher weight for positive (event) samples."""
+class WeightedBCEWithLogitsLoss(nn.Module):
+    """BCEWithLogitsLoss with higher weight for positive (event) samples."""
     def __init__(self, pos_weight: float = 20.0):
         super().__init__()
-        self.pos_weight = pos_weight
+        self.register_buffer("pos_weight", torch.tensor([pos_weight]))
+        self.criterion = nn.BCEWithLogitsLoss()
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        weight = torch.where(target > 0.5, self.pos_weight, 1.0)
-        return torch.mean(weight * (pred - target) ** 2)
+        self.criterion.pos_weight = self.pos_weight
+        return self.criterion(pred, target)
 
 
 # ── Lightning Module for Event Encoder ─────────────────────────────────────
@@ -90,7 +91,7 @@ class EventEncoderLitModule(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.encoder = EventEncoder(input_dim, hidden_dim)
-        self.loss_fn = WeightedMSELoss(pos_weight=20.0)
+        self.loss_fn = WeightedBCEWithLogitsLoss(pos_weight=20.0)
         self.lr = lr
 
     def forward(self, x: torch.Tensor):
@@ -142,7 +143,7 @@ class Conv1DLitModule(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.detector = Conv1DDetector(input_dim)
-        self.loss_fn = WeightedMSELoss(pos_weight=20.0)
+        self.loss_fn = WeightedBCEWithLogitsLoss(pos_weight=20.0)
         self.lr = lr
 
     def forward(self, x):
@@ -237,6 +238,7 @@ def _make_learned_score_fn(lit_model: EventEncoderLitModule, device: torch.devic
         traj = torch.from_numpy(sample["trajectory"]).unsqueeze(0).to(device)
         with torch.no_grad():
             _, scores_t = lit_model.encoder(traj)
+            scores_t = torch.relu(scores_t)
         return scores_t.squeeze(0).cpu().numpy()
     return score_fn
 

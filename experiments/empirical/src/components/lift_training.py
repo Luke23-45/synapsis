@@ -54,28 +54,35 @@ def _extract_anchors_numpy(
 # ── Contrastive Loss ───────────────────────────────────────────────────────
 
 def _contrastive_loss(
-    lifted_batch: torch.Tensor, labels: torch.Tensor, temperature: float = 0.1,
+    centroids: torch.Tensor, labels: torch.Tensor, temperature: float = 0.1,
 ) -> torch.Tensor:
-    """NT-Xent contrastive loss on cloud centroids."""
-    centroids = lifted_batch.mean(dim=1)
+    """NT-Xent contrastive loss on cloud centroids (SupCon formulation)."""
     centroids = F.normalize(centroids, dim=-1)
     B = centroids.shape[0]
     if B < 2:
         return torch.tensor(0.0, device=centroids.device, requires_grad=True)
+        
     sim = torch.mm(centroids, centroids.T) / temperature
+    mask = torch.ones_like(sim) - torch.eye(B, device=sim.device)
+    
+    sim_max, _ = torch.max(sim, dim=1, keepdim=True)
+    sim = sim - sim_max.detach()
+    
+    exp_sim = torch.exp(sim) * mask
+    log_prob = sim - torch.log(exp_sim.sum(dim=1, keepdim=True) + 1e-8)
+    
     label_eq = (labels.unsqueeze(0) == labels.unsqueeze(1)).float()
-    label_eq.fill_diagonal_(0)
+    label_eq = label_eq * mask
+    
     pos_count = label_eq.sum(dim=1)
     valid_mask = pos_count > 0
     if not valid_mask.any():
         return torch.tensor(0.0, device=centroids.device, requires_grad=True)
-    exp_sim = torch.exp(sim)
-    mask = torch.ones_like(exp_sim) - torch.eye(B, device=exp_sim.device)
-    exp_sim = exp_sim * mask
-    pos_sum = (exp_sim * label_eq).sum(dim=1)
-    all_sum = exp_sim.sum(dim=1)
-    loss = -torch.log(pos_sum / all_sum.clamp_min(1e-8) + 1e-8)
-    return loss[valid_mask].mean()
+        
+    mean_log_prob_pos = (label_eq * log_prob).sum(dim=1) / pos_count.clamp_min(1.0)
+    loss = -mean_log_prob_pos[valid_mask].mean()
+    
+    return loss
 
 
 # ── Lightning Module for Contrastive Lift ──────────────────────────────────
@@ -107,7 +114,11 @@ class ContrastiveLiftLitModule(pl.LightningModule):
     def _shared_step(self, batch, stage):
         vectors, labels = batch
         _, lifted = self.lift(vectors)
-        loss = _contrastive_loss(lifted, labels, self.temperature)
+        valid_mask = (vectors.abs().sum(dim=-1) > 1e-6).float()
+        sum_lifted = (lifted * valid_mask.unsqueeze(-1)).sum(dim=1)
+        count = valid_mask.sum(dim=1, keepdim=True).clamp_min(1.0)
+        centroids = sum_lifted / count
+        loss = _contrastive_loss(centroids, labels, self.temperature)
         self.log(f"{stage}/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         return loss
 
@@ -177,6 +188,17 @@ def _ridge_probe_accuracy(X_train, y_train, X_test, y_test) -> float:
     )
 
 
+def _compute_centroids_numpy(X: np.ndarray, lifted: np.ndarray) -> np.ndarray:
+    """Compute mean of lifted vectors, ignoring padding in X (where X is all zeros)."""
+    valid_mask = (np.abs(X).sum(axis=-1) > 1e-6).astype(np.float32)
+    sum_lifted = (lifted * valid_mask[..., np.newaxis]).sum(axis=1)
+    count = valid_mask.sum(axis=1, keepdims=True)
+    count[count < 1] = 1.0
+    c = sum_lifted / count
+    norms = np.linalg.norm(c, axis=1, keepdims=True)
+    return c / np.maximum(norms, 1e-8)
+
+
 # ── Single-Seed Experiment ─────────────────────────────────────────────────
 
 def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
@@ -240,8 +262,8 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     with torch.no_grad():
         _, lifted_train = lit_trained.lift(torch.from_numpy(X_train).float())
         _, lifted_test = lit_trained.lift(torch.from_numpy(X_test).float())
-    c_train = lifted_train.mean(dim=1).numpy()
-    c_test = lifted_test.mean(dim=1).numpy()
+    c_train = _compute_centroids_numpy(X_train, lifted_train.numpy())
+    c_test = _compute_centroids_numpy(X_test, lifted_test.numpy())
     results["LIFT_TRAINED_probe_acc"] = _ridge_probe_accuracy(c_train, y_train, c_test, y_test)
 
     try:
@@ -260,12 +282,15 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     with torch.no_grad():
         _, lr_train = lift_random(torch.from_numpy(X_train).float())
         _, lr_test = lift_random(torch.from_numpy(X_test).float())
+    
+    lr_c_train = _compute_centroids_numpy(X_train, lr_train.numpy())
+    lr_c = _compute_centroids_numpy(X_test, lr_test.numpy())
+    
     results["LIFT_RANDOM_probe_acc"] = _ridge_probe_accuracy(
-        lr_train.mean(dim=1).numpy(), y_train, lr_test.mean(dim=1).numpy(), y_test,
+        lr_c_train, y_train, lr_c, y_test,
     )
     try:
         from sklearn.metrics import silhouette_score
-        lr_c = lr_test.mean(dim=1).numpy()
         if len(np.unique(y_test)) > 1 and len(lr_c) > len(np.unique(y_test)):
             results["LIFT_RANDOM_silhouette"] = float(silhouette_score(lr_c, y_test))
         else:
@@ -283,7 +308,8 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     def _pca_centroids(X_all):
         flat = X_all.reshape(-1, anchor_dim)
         projected = (flat - mean_pca) @ W_pca.T
-        return projected.reshape(X_all.shape[0], X_all.shape[1], lift_dim).mean(axis=1)
+        projected_seq = projected.reshape(X_all.shape[0], X_all.shape[1], lift_dim)
+        return _compute_centroids_numpy(X_all, projected_seq)
 
     results["LIFT_PCA_probe_acc"] = _ridge_probe_accuracy(
         _pca_centroids(X_train), y_train, _pca_centroids(X_test), y_test,
@@ -291,7 +317,8 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
 
     # ── LIFT-IDENTITY ──
     results["LIFT_IDENTITY_probe_acc"] = _ridge_probe_accuracy(
-        X_train.mean(axis=1), y_train, X_test.mean(axis=1), y_test,
+        _compute_centroids_numpy(X_train, X_train), y_train, 
+        _compute_centroids_numpy(X_test, X_test), y_test,
     )
 
     # ── LIFT-NO-NORM: trained W_Θ but bypass normalization ──
@@ -315,7 +342,8 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         _, nn_train = lit_no_norm.lift(torch.from_numpy(X_train).float())
         _, nn_test = lit_no_norm.lift(torch.from_numpy(X_test).float())
     results["LIFT_NO_NORM_probe_acc"] = _ridge_probe_accuracy(
-        nn_train.mean(dim=1).numpy(), y_train, nn_test.mean(dim=1).numpy(), y_test,
+        _compute_centroids_numpy(X_train, nn_train.numpy()), y_train, 
+        _compute_centroids_numpy(X_test, nn_test.numpy()), y_test,
     )
 
     save_experiment_npz("EMP-03", seed, {"X_test": X_test, "y_test": y_test, "X_train": X_train, "y_train": y_train}, cfg.output_dir)

@@ -25,9 +25,10 @@ class _RelaxedSelectorFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
-        # Implicit differentiation proxy: unconstrained Jacobian is 1/(2*lam) * I
-        grad_saliency = grad_output / (2.0 * ctx.lam)
-        return grad_saliency, None, None, None, None
+        # Straight-Through Estimator (STE) proxy:
+        # We pass the gradient directly through the selector to provide a stronger
+        # training signal to the event encoder.
+        return grad_output, None, None, None, None
 
 
 class RelaxedSelectorLayer(nn.Module):

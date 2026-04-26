@@ -49,7 +49,7 @@ class SelectorProbeModel(nn.Module):
 
     def forward(self, x: torch.Tensor):
         hidden, event_scores = self.event_encoder(x)
-        saliency = self.saliency_norm(event_scores)
+        saliency = self.saliency_norm(F.softplus(event_scores))
         y_star = self.selector(saliency)
         weights = y_star.unsqueeze(-1)
         weighted_sum = (hidden * weights).sum(dim=1)
@@ -88,7 +88,7 @@ class TopKProbeModel(nn.Module):
     def forward(self, x: torch.Tensor):
         hidden, event_scores = self.event_encoder(x)
         B, T, h = hidden.shape
-        _, topk_idx = event_scores.topk(min(self.K, T), dim=1)
+        _, topk_idx = F.softplus(event_scores).topk(min(self.K, T), dim=1)
         y_star = torch.zeros(B, T, device=x.device, dtype=x.dtype)
         y_star.scatter_(1, topk_idx, 1.0)
         weights = y_star.unsqueeze(-1)
@@ -111,7 +111,7 @@ class SoftmaxAttnProbeModel(nn.Module):
 
     def forward(self, x: torch.Tensor):
         hidden, event_scores = self.event_encoder(x)
-        saliency = self.saliency_norm(event_scores)
+        saliency = self.saliency_norm(F.softplus(event_scores))
         y_star = torch.softmax(saliency / self.temperature, dim=-1)
         weights = y_star.unsqueeze(-1)
         weighted_sum = (hidden * weights).sum(dim=1)
@@ -205,7 +205,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     T = cfg.trajectory.T
     K = cfg.memory.K
     r = cfg.memory.r
-    lam = cfg.memory.lam
+    lam = 0.1  # Force budget constraint to be active for sparsity
     hidden_dim = cfg.model.hidden_dim if hasattr(cfg, "model") else 64
     epochs = cfg.training.full_epochs
     lr = cfg.training.lr

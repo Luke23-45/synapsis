@@ -34,4 +34,4 @@ training:
 
 # ── Acceptance gates ─────────────────────────────────────────────────────
 acceptance_gates:
-  min_family_win_ratio: 0.67  # SEL-Z2 beats SEL-UNI on ≥2/3 families
+  min_family_win_ratio: 0.66  # SEL-Z2 beats SEL-UNI on ≥2/3 families

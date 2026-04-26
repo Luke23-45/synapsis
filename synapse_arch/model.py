@@ -157,13 +157,30 @@ class SynapseEndToEndModel(nn.Module):
     def forward_deploy(self, batch: dict, use_anchors: bool = True, use_topology: bool = True) -> DeployForwardOutput:
         structured_history = batch["structured_history"]
         structured_state = batch["structured_state"]
+        seq_len = structured_history.shape[1]
         exact_states = []
         anchor_clouds = []
         topo_features = []
+        deploy_activations_list = []
+        pos_indices_list = []
         for sequence in structured_history.detach().cpu().numpy():
             exact_state = self._deploy_single(np.asarray(sequence, dtype=np.float64))
             exact_states.append(exact_state)
             cloud = exact_state.point_cloud.astype(np.float32)
+            num_valid = min(cloud.shape[0], self.config.K)
+            
+            deploy_act = np.zeros(self.config.K, dtype=np.float32)
+            deploy_act[:num_valid] = 1.0
+            deploy_activations_list.append(torch.from_numpy(deploy_act).to(structured_history.device))
+            
+            pos = [0]
+            for idx in exact_state.anchor_indices[:self.config.K]:
+                pos.append(int(idx) + 1)
+            for _ in range(self.config.K - len(exact_state.anchor_indices[:self.config.K])):
+                pos.append(0)
+            pos.append(seq_len + 1)
+            pos_indices_list.append(pos)
+            
             if cloud.shape[0] < self.config.K:
                 pad = np.zeros((self.config.K - cloud.shape[0], self.config.k), dtype=np.float32)
                 cloud = np.concatenate([cloud, pad], axis=0)
@@ -171,17 +188,28 @@ class SynapseEndToEndModel(nn.Module):
                 cloud = cloud[: self.config.K]
             anchor_clouds.append(torch.from_numpy(cloud).to(structured_history.device, dtype=structured_history.dtype))
             topo_features.append(torch.from_numpy(exact_state.topology_summary).to(structured_history.device, dtype=structured_history.dtype))
+            
         anchor_cloud_tensor = torch.stack(anchor_clouds, dim=0)
         topo_tensor = torch.stack(topo_features, dim=0)
+        deploy_activations = torch.stack(deploy_activations_list, dim=0)
+        pos_indices_tensor = torch.tensor(pos_indices_list, dtype=torch.long, device=structured_history.device)
+        
         topo_proj_features = self.topology_branch.proj(topo_tensor)
         anchor_tokens, topo_token = self.memory_readout.forward_deploy(anchor_cloud_tensor, topo_proj_features)
+        
+        anchor_tokens = anchor_tokens * deploy_activations.unsqueeze(-1)
+        
         if not use_anchors:
             anchor_tokens = torch.zeros_like(anchor_tokens)
         if not use_topology:
             topo_token = torch.zeros_like(topo_token)
+            
         current_token = self.current_proj(structured_state).unsqueeze(1)
         transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token], dim=1)
-        encoded = self.task_transformer(transformer_tokens)
+        
+        key_padding_mask = self._build_padding_mask(deploy_activations)
+        encoded = self.task_transformer(transformer_tokens, key_padding_mask=key_padding_mask, pos_indices=pos_indices_tensor)
+        
         pred_actions = self.action_head(encoded[:, 0, :])
         return DeployForwardOutput(
             pred_actions=pred_actions,
