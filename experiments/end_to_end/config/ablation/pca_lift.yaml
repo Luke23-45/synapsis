@@ -1,0 +1,4 @@
+# Ablation: PCA lift (deterministic, not learned)
+# Tests whether learned lift outperforms PCA-based projection
+ablation:
+  lift_mode: pca

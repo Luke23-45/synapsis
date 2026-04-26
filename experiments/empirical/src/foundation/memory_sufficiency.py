@@ -508,7 +508,7 @@ def _probe_accuracy(
 
         mean = np.mean(train_x, axis=0, keepdims=True)
         std = np.std(train_x, axis=0, keepdims=True)
-        std[std < 1e-8] = 1.0
+        std[std < 1e-5] = 1.0
 
         train_x_n = (train_x - mean) / std
         val_x_n = (x_val - mean) / std
@@ -516,7 +516,7 @@ def _probe_accuracy(
 
         best_w = None
         best_val = -1.0
-        for alpha in (1e-4, 1e-3, 1e-2, 1e-1, 1.0):
+        for alpha in (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0):
             w = _fit_ridge_ovr(train_x_n, train_y, unique_labels, alpha)
             val_acc = _predict_accuracy(w, val_x_n, y_val, unique_labels) if len(val_x_n) else _predict_accuracy(w, train_x_n, train_y, unique_labels)
             if val_acc > best_val:

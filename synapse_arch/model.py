@@ -94,11 +94,18 @@ class SynapseEndToEndModel(nn.Module):
         topo_mask = torch.zeros(activations.shape[0], 1, dtype=torch.bool, device=activations.device)
         return torch.cat([current_mask, anchor_mask, topo_mask], dim=1)
 
+    def _mask_saliency(self, saliency_scores: torch.Tensor, batch: dict) -> torch.Tensor:
+        history_mask = batch.get("history_mask")
+        if history_mask is None:
+            return saliency_scores
+        return saliency_scores.masked_fill(~history_mask.to(device=saliency_scores.device), -10.0)
+
     def forward_train(self, batch: dict, use_anchors: bool = True, use_topology: bool = True) -> TrainForwardOutput:
         structured_history = batch["structured_history"]
         structured_state = batch["structured_state"]
         _, event_scores = self.event_encoder(structured_history)
         saliency_scores = self.saliency_normalizer(event_scores)
+        saliency_scores = self._mask_saliency(saliency_scores, batch)
         y_star = self.relaxed_selector(saliency_scores)
         soft_vectors = self._soft_anchor_vectors(structured_history, saliency_scores)
         _, dense_lifted = self.normalized_lift(soft_vectors)
@@ -157,14 +164,16 @@ class SynapseEndToEndModel(nn.Module):
     def forward_deploy(self, batch: dict, use_anchors: bool = True, use_topology: bool = True) -> DeployForwardOutput:
         structured_history = batch["structured_history"]
         structured_state = batch["structured_state"]
-        seq_len = structured_history.shape[1]
+        history_lengths = batch.get("history_lengths")
         exact_states = []
         anchor_clouds = []
         topo_features = []
         deploy_activations_list = []
         pos_indices_list = []
-        for sequence in structured_history.detach().cpu().numpy():
-            exact_state = self._deploy_single(np.asarray(sequence, dtype=np.float64))
+        for batch_index, sequence in enumerate(structured_history.detach().cpu().numpy()):
+            actual_length = int(history_lengths[batch_index].item()) if history_lengths is not None else sequence.shape[0]
+            trimmed_sequence = np.asarray(sequence[:actual_length], dtype=np.float64)
+            exact_state = self._deploy_single(trimmed_sequence)
             exact_states.append(exact_state)
             cloud = exact_state.point_cloud.astype(np.float32)
             num_valid = min(cloud.shape[0], self.config.K)
@@ -178,7 +187,7 @@ class SynapseEndToEndModel(nn.Module):
                 pos.append(int(idx) + 1)
             for _ in range(self.config.K - len(exact_state.anchor_indices[:self.config.K])):
                 pos.append(0)
-            pos.append(seq_len + 1)
+            pos.append(actual_length + 1)
             pos_indices_list.append(pos)
             
             if cloud.shape[0] < self.config.K:

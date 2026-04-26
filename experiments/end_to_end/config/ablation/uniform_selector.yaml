@@ -1,0 +1,4 @@
+# Ablation: Uniform selector (equal weight to all timesteps)
+# Tests whether learned event selection adds value over uniform
+ablation:
+  selector_mode: uniform

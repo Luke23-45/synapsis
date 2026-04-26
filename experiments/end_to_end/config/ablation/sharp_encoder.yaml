@@ -1,0 +1,4 @@
+# Ablation: Sharp (handcrafted) event encoder
+# Tests whether a learned encoder outperforms a curvature-based heuristic
+ablation:
+  encoder_mode: sharp

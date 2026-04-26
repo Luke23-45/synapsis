@@ -1,0 +1,5 @@
+# Ablation: No topology token
+# Tests the contribution of the topological summary branch
+ablation:
+  use_anchors: true
+  use_topology: false

@@ -1,0 +1,4 @@
+# Ablation: No state normalization in NormalizedLift
+# Tests whether the N(v) normalization step (§8) is necessary
+ablation:
+  normalization: false

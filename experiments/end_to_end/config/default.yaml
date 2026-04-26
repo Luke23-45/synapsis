@@ -1,0 +1,129 @@
+defaults:
+  - _self_
+  - ablation: baseline
+
+# Z2 end-to-end training default configuration.
+# Source of truth:
+#   - docs/formal_math/z2/z2_architectures.md
+#   - docs/formal_math/z2/02_rigorous_architecture.md
+
+model:
+  input_dim: 22
+  action_dim: 8
+  action_chunk_size: 10
+  hidden_dim: 64
+  d_model: 128
+  num_heads: 4
+  num_layers: 3
+  ffn_ratio: 4
+  dropout: 0.1
+  K: 10
+  r: 2
+  lam: 1.0
+  Q: 1
+  k: 8
+
+training:
+  batch_size: 16
+  epochs: 300
+  learning_rate: 3.0e-4
+  weight_decay: 1.0e-4
+  optimizer: adamw
+  betas: [0.9, 0.999]
+  scheduler: cosine_warmup
+  warmup_epochs: 15
+  min_lr: 1.0e-6
+  gradient_clip: 1.0
+  ema_decay: 0.999
+  early_stopping_patience: 40
+  val_check_interval: 5
+  num_seeds: 5
+  use_amp: false
+  compile_model: false
+  num_workers: 0
+  pin_memory: true
+  max_train_batches: null
+  max_eval_batches: null
+  max_analysis_batches: null
+
+losses:
+  action_weight: 1.0
+  sparsity_weight: 0.01
+  topology_reg_weight: 0.001
+  action_beta: 0.5
+  aux_ramp_start: 10
+  aux_ramp_end: 30
+
+data:
+  train_lmdb: outputs/dataset/data/val/expert_expert_pick_place_val_50_episodes/expert_expert_pick_place_val_50_episodes.lmdb
+  val_lmdb: outputs/dataset/data/val/expert_expert_pick_place_val_50_episodes/expert_expert_pick_place_val_50_episodes.lmdb
+  split_seed: 42
+  normalize_states: true
+  normalize_actions: false
+  proprio_noise: 0.005
+  use_aug: true
+  min_history: 2
+
+ablation:
+  use_anchors: true
+  use_topology: true
+  encoder_mode: learned
+  selector_mode: relaxed
+  lift_mode: learned
+  normalization: true
+
+logging:
+  output_dir: experiments/outputs/end_to_end
+  seed: 42
+  log_interval: 10
+  save_best: true
+  save_interval: 50
+  manifest_name: run_manifest.json
+  resolved_config_name: resolved_config.yaml
+  use_wandb: true
+  wandb_project: SYNAPSE_E2E
+  wandb_mode: offline
+  wandb_run_name: null
+
+analysis:
+  enabled: true
+  anchor_heatmap_samples: 20
+  topology_tsne_max_samples: 2000
+  topology_tsne_perplexity: 30
+  topology_tsne_random_seed: 42
+
+smoke:
+  enabled: false
+  epochs: 3
+  batch_size: 4
+  early_stopping_patience: 999
+  val_check_interval: 1
+  log_interval: 1
+  use_aug: false
+  reuse_validation_for_training: true
+  max_train_batches: 8
+  max_eval_batches: 4
+  max_analysis_batches: 4
+
+scripts:
+  evaluate:
+    gap_threshold: 0.10
+    output_filename: eval_results.json
+  deploy_test:
+    num_samples: 20
+    gap_threshold: 0.10
+    output_filename: deploy_test_results.json
+  ablations:
+    configs:
+      - baseline
+      - no_anchors
+      - no_topology
+    output_root: experiments/outputs/end_to_end/ablations
+    report_filename_template: ablation_report_seed_{seed}.md
+    run_name_prefix: ablation
+  runner:
+    manifest_name: run_manifest.json
+
+checkpoint: null
+output: null
+num_samples: null

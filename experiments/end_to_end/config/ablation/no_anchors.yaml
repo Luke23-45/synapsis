@@ -1,0 +1,5 @@
+# Ablation: No anchor tokens
+# Tests the contribution of the Z2 anchor selection mechanism
+ablation:
+  use_anchors: false
+  use_topology: true

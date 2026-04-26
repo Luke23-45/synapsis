@@ -66,7 +66,9 @@ applied
 docs
 outputs
 experiments/outputs
-# TASKS.md
+TASKS.md
 legacy
 logs.md
 applied_robotics
+working
+baselines

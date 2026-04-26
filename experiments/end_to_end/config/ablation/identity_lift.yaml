@@ -1,0 +1,4 @@
+# Ablation: Identity lift (no dimensionality change)
+# Tests whether the geometric lift step is necessary
+ablation:
+  lift_mode: identity

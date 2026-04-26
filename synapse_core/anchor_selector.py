@@ -397,6 +397,14 @@ def solve_relaxed_selector(
     if T == 1:
         return np.array([0.0], dtype=np.float64)
 
+    # Analytic fast-path for completely decoupled problem (M^inf with r=0)
+    # When budget K >= T and refractory r = 0, the constraints decouple.
+    if K >= T and r == 0:
+        y_star = np.clip(saliency / (2.0 * lam), 0.0, 1.0)
+        y_star[0] = 0.0
+        y_star[y_star < _SOLVER_ZERO_TOL] = 0.0
+        return y_star
+
     # Build QP: minimize ½ yᵀPy + qᵀy
     P = 2.0 * lam * np.eye(T, dtype=np.float64)
     q = -saliency.astype(np.float64)

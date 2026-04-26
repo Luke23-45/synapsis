@@ -1,0 +1,8 @@
+# Baseline configuration for the end-to-end stack.
+ablation:
+  use_anchors: true
+  use_topology: true
+  encoder_mode: learned
+  selector_mode: relaxed
+  lift_mode: learned
+  normalization: true

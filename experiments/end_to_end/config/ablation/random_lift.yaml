@@ -1,0 +1,4 @@
+# Ablation: Random lift matrix (frozen, not learned)
+# Tests whether learning W_Theta adds value over random projection
+ablation:
+  lift_mode: random

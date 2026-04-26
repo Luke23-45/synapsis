@@ -142,6 +142,11 @@ def _compute_with_ripser(
             message='The input point cloud has more columns than rows; did you mean to transpose?',
             category=UserWarning,
         )
+        warnings.filterwarnings(
+            'ignore',
+            message='The input matrix is square, but the distance_matrix flag is off.  Did you mean to indicate that this was a distance matrix?',
+            category=UserWarning,
+        )
         result = ripser(cloud, maxdim=Q, thresh=max_edge_length, distance_matrix=False)
 
     diagrams = [[] for _ in range(Q + 1)]

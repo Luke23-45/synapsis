@@ -35,8 +35,12 @@ def summarize_diagrams(diagrams: List) -> np.ndarray:
             continue
         finite = points[np.isfinite(points[:, 1])]
         pers = finite[:, 1] - finite[:, 0] if len(finite) else np.zeros(0, dtype=np.float32)
+        
+        # Filter numerical artifacts (tiny bars) which explode under Standard Scaler
+        pers = pers[pers > 1e-4]
+        
         summary.extend([
-            float(len(finite)),
+            float(len(pers)),
             float(pers.mean()) if len(pers) else 0.0,
             float(pers.max()) if len(pers) else 0.0,
             float(pers.sum()) if len(pers) else 0.0,

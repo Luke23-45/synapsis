@@ -68,10 +68,11 @@ def _sample_event_set(
     return C
 
 
-def _dominance_margin(y_star: np.ndarray, C: List[int]) -> float:
+def _dominance_margin(y_star: np.ndarray, C: List[int], K: int) -> float:
     """margin = min_{t∈C} y*_t − max_{u∉C, u>0} y*_u.  Positive ⇒ strict dominance.
 
     Fully vectorised via np.isin — no Python-level iteration.
+    Enforces Theorem 6.3 second condition: if m < K, max_{u∉C} y*_u must be <= 0.
     """
     if not C:
         return 0.0
@@ -84,6 +85,10 @@ def _dominance_margin(y_star: np.ndarray, C: List[int]) -> float:
     mask[C_arr] = False
     non_c_vals = y_star[mask]
     max_nc = float(non_c_vals.max()) if len(non_c_vals) > 0 else 0.0
+    
+    if len(C) < K and max_nc > 0.0:
+        return -1.0
+        
     return min_c - max_nc
 
 
@@ -162,7 +167,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         traj = _generate_trajectory_with_known_events(d, T, C, mag, noise, rng)
         trajs.append(traj)
         y_star, I_star = _run_pipeline(traj, K, r, lam)
-        margin = _dominance_margin(y_star, C)
+        margin = _dominance_margin(y_star, C, K)
         all_margins.append(margin)
 
         if margin > 0:
@@ -201,7 +206,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
                 continue
             traj = _generate_trajectory_with_known_events(d, T, C, 5.0, 0.05, rng)
             y_star, I_star = _run_pipeline(traj, K, r, lam)
-            margins.append(_dominance_margin(y_star, C))
+            margins.append(_dominance_margin(y_star, C, K))
             f1s.append(_recovery_f1(I_star, C))
             exacts.append(1.0 if _exact_recovery(I_star, C) else 0.0)
 
@@ -230,7 +235,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         edge_total += 1
         traj = _generate_trajectory_with_known_events(d, T, C_sat, 10.0, 0.01, rng)
         y_star, I_star = _run_pipeline(traj, K, r, 0.01)
-        margin = _dominance_margin(y_star, C_sat)
+        margin = _dominance_margin(y_star, C_sat, K)
         if margin > 0 and _exact_recovery(I_star, C_sat):
             edge_pass += 1
         results["C_saturated_margin"] = margin
@@ -239,7 +244,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
     edge_total += 1
     traj = _generate_trajectory_with_known_events(d, T, [T // 2], 10.0, 0.01, rng)
     y_star, I_star = _run_pipeline(traj, K, r, 0.01)
-    margin = _dominance_margin(y_star, [T // 2])
+    margin = _dominance_margin(y_star, [T // 2], K)
     if margin > 0 and _exact_recovery(I_star, [T // 2]):
         edge_pass += 1
     results["C_single_margin"] = margin
@@ -250,7 +255,7 @@ def run_single_seed(config: Any, seed: int) -> Dict[str, float]:
         edge_total += 1
         traj = _generate_trajectory_with_known_events(d, T, C_bnd, 10.0, 0.01, rng)
         y_star, I_star = _run_pipeline(traj, K, r, 0.01)
-        margin = _dominance_margin(y_star, C_bnd)
+        margin = _dominance_margin(y_star, C_bnd, K)
         if margin > 0 and _exact_recovery(I_star, C_bnd):
             edge_pass += 1
         results["C_boundary_margin"] = margin

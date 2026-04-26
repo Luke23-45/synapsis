@@ -1,0 +1,4 @@
+# Ablation: Top-K selector instead of Z2 relaxed selector
+# Tests whether the QP-relaxed selector outperforms naive top-K
+ablation:
+  selector_mode: topk
