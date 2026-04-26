@@ -122,6 +122,7 @@ class TrainingParams:
     prefetch_factor: int = 4
     compile_model: bool = False
     fused_adamw: bool = True
+    save_checkpoints: bool = False
 
 
 @dataclass(frozen=True)
@@ -234,13 +235,12 @@ class ExperimentConfig:
 
     @property
     def structured_state_dim(self) -> int:
-        return (
-            self.data.proprio_dim
-            + self.data.ee_pose_dim
-            + self.data.ee_vel_dim
-            + self.data.object_pos_dim
-            + self.data.grasp_dim
-        )
+        """Total dimensionality of the state vector.
+        
+        In Phase 4 baselines using LeRobot, the entire state is represented
+        by proprio_dim, unlike the Phase 3 E2E custom LMDB format.
+        """
+        return self.data.proprio_dim
 
     def for_dataset(self, dataset_spec: DatasetSpec) -> "ExperimentConfig":
         """Create a dataset-specific config by overriding dimensions.
@@ -284,6 +284,7 @@ class ExperimentConfig:
                 prefetch_factor=self.training.prefetch_factor,
                 compile_model=self.training.compile_model,
                 fused_adamw=self.training.fused_adamw,
+                save_checkpoints=self.training.save_checkpoints,
             )
 
         return ExperimentConfig(

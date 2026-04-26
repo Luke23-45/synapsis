@@ -185,14 +185,13 @@ def _run_dataset_experiment(
         [{"proprio_history": ep.structured_history} for ep in train_eps]
     )
     norm_stats.save(ds_output / "normalization_stats.pt")
+    action_norm_stats = compute_normalization_stats_from_episodes(
+        [{"actions": ep.actions} for ep in train_eps],
+        proprio_key="actions",
+    )
+    action_norm_stats.save(ds_output / "action_normalization_stats.pt")
 
-    # 5. Apply normalization
-    for ep in episodes:
-        ep.apply_structured_normalization(
-            norm_stats.normalize(ep.structured_history)
-        )
-
-    # 6. Cache SYNAPSE features (if any B-conditions are requested)
+    # 5. Cache SYNAPSE features (if any B-conditions are requested)
     synapse_conditions = [c for c in conditions if c.uses_synapse]
     if synapse_conditions:
         for split_name, split_eps in [
@@ -231,7 +230,7 @@ def _run_dataset_experiment(
                     ds_name, split_name, e,
                 )
 
-    # 7. Train and evaluate each condition
+    # 6. Train and evaluate each condition
     results: Dict[str, dict] = {}
 
     for condition in conditions:
@@ -255,7 +254,12 @@ def _run_dataset_experiment(
 
         try:
             train_loader, val_loader, test_loader = create_dataloaders(
-                train_eps, val_eps, test_eps, cond_config, norm_stats
+                train_eps,
+                val_eps,
+                test_eps,
+                cond_config,
+                norm_stats,
+                action_norm_stats=action_norm_stats,
             )
 
             cond_dir = ds_output / f"condition_{cond_name}"

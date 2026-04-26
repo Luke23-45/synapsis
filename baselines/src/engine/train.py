@@ -338,8 +338,11 @@ class Trainer:
             if val_mse < self.state.best_val_loss:
                 self.state.best_val_loss = val_mse
                 self.state.patience_counter = 0
-                self.save_checkpoint("best.pt")
-                log.info("  → New best val_mse=%.6f, checkpoint saved", val_mse)
+                if self.config.training.save_checkpoints:
+                    self.save_checkpoint("best.pt")
+                    log.info("  → New best val_mse=%.6f, checkpoint saved", val_mse)
+                else:
+                    log.info("  → New best val_mse=%.6f (checkpoint saving disabled)", val_mse)
             else:
                 self.state.patience_counter += 1
                 if self.state.patience_counter >= self.config.training.early_stopping_patience:
@@ -352,7 +355,7 @@ class Trainer:
 
         self.state.elapsed_seconds = time.time() - start_time
         best_path = self.output_dir / "best.pt"
-        if best_path.exists():
+        if best_path.exists() and self.config.training.save_checkpoints:
             self.load_checkpoint("best.pt")
         log.info(
             "Training complete: %d epochs, %.1fs, best_val_mse=%.6f",

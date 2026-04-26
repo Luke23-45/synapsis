@@ -336,11 +336,15 @@ class LeRobotAdapter(BaseDatasetAdapter):
 
         data = raw_data[key]
 
-        if isinstance(data, np.ndarray):
-            arr = data
+        if isinstance(data, np.ndarray) and data.dtype == object:
+            # HuggingFace/Parquet list columns become arrays of objects
+            arr = np.stack([np.asarray(x, dtype=np.float32).flatten() for x in data])
         elif isinstance(data, list):
             # May be list of lists or list of scalars
-            arr = np.array(data, dtype=np.float32)
+            try:
+                arr = np.array(data, dtype=np.float32)
+            except ValueError:
+                arr = np.stack([np.asarray(x, dtype=np.float32).flatten() for x in data])
         else:
             arr = np.asarray(data, dtype=np.float32)
 

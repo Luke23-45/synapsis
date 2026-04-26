@@ -82,6 +82,7 @@ def _make_batch(config: ExperimentConfig, B: int = 2, T: int = 30) -> dict:
         "structured_state": torch.randn(B, config.structured_state_dim),
         "structured_history": torch.randn(B, T, config.structured_state_dim),
         "action_chunk": torch.randn(B, config.data.action_chunk_size, config.data.action_dim),
+        "history_length": torch.full((B,), T, dtype=torch.long),
     }
     if config.condition.uses_synapse:
         batch["synapse_anchors"] = torch.randn(B, config.synapse.K, config.anchor_feature_dim)
@@ -195,6 +196,19 @@ class TestUniformSampling:
         W = config_a2.data.history_window
         indices = model._compute_uniform_indices(T, W, torch.device("cpu"))
         assert len(torch.unique(indices)) == len(indices)
+
+    def test_batched_uniform_indices_skip_left_padding(self, config_a2):
+        model = PlannerUniform(config_a2)
+        history_lengths = torch.tensor([4, 10], dtype=torch.long)
+        indices = model._compute_batched_uniform_indices(
+            history_lengths,
+            padded_length=10,
+            device=torch.device("cpu"),
+        )
+        assert indices.shape == (2, config_a2.data.history_window)
+        assert torch.all(indices[0] >= 6)
+        assert indices[0, -1].item() == 9
+        assert indices[1, 0].item() == 0
 
 
 # ---------------------------------------------------------------------------

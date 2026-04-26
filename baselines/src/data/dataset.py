@@ -97,10 +97,12 @@ class RoboticsDataset(Dataset):
         episodes: List[RobotEpisode],
         config: ExperimentConfig,
         norm_stats: NormalizationStats,
+        action_norm_stats: Optional[NormalizationStats] = None,
         split: str = "train",
     ) -> None:
         self.config = config
         self.norm_stats = norm_stats
+        self.action_norm_stats = action_norm_stats
         self.split = split
         self.condition = config.condition
         self._episodes = episodes
@@ -168,6 +170,17 @@ class RoboticsDataset(Dataset):
             ep.actions[t : t + self.config.data.action_chunk_size],
             dtype=torch.float32,
         )
+
+        # Normalize exactly once at sample time. Episodes stay in raw scale so
+        # downstream cache builders and evaluators can apply the same transform
+        # consistently without accidental double-normalization.
+        proprio = self.norm_stats.normalize_torch(proprio)
+        proprio_history = self.norm_stats.normalize_torch(proprio_history)
+        structured_state = self.norm_stats.normalize_torch(structured_state)
+        structured_history = self.norm_stats.normalize_torch(structured_history)
+
+        if self.action_norm_stats is not None:
+            action_chunk = self.action_norm_stats.normalize_torch(action_chunk)
         phase_label = torch.tensor(int(ep.gt_phase[t]), dtype=torch.long)
         episode_length = torch.tensor(ep.length, dtype=torch.long)
         timestep = torch.tensor(t, dtype=torch.long)
@@ -325,6 +338,7 @@ def create_dataloaders(
     test_eps: List[RobotEpisode],
     config: ExperimentConfig,
     norm_stats: NormalizationStats,
+    action_norm_stats: Optional[NormalizationStats] = None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """Create train/val/test DataLoaders from episode lists.
 
@@ -332,13 +346,13 @@ def create_dataloaders(
     variable-length histories across all dataset types.
     """
     train_dataset = RoboticsDataset(
-        train_eps, config, norm_stats, split="train"
+        train_eps, config, norm_stats, action_norm_stats=action_norm_stats, split="train"
     )
     val_dataset = RoboticsDataset(
-        val_eps, config, norm_stats, split="val"
+        val_eps, config, norm_stats, action_norm_stats=action_norm_stats, split="val"
     )
     test_dataset = RoboticsDataset(
-        test_eps, config, norm_stats, split="test"
+        test_eps, config, norm_stats, action_norm_stats=action_norm_stats, split="test"
     )
 
     loader_kwargs = {

@@ -86,6 +86,12 @@ def norm_stats(episodes):
     return compute_normalization_stats(arrays)
 
 
+@pytest.fixture
+def action_norm_stats(episodes):
+    arrays = [ep.actions for ep in episodes]
+    return compute_normalization_stats(arrays)
+
+
 # ---------------------------------------------------------------------------
 # Episode tests
 # ---------------------------------------------------------------------------
@@ -177,6 +183,19 @@ class TestRoboticsDataset:
         sample = dataset[0]
         assert "synapse_anchors" not in sample
 
+    def test_actions_use_action_stats(self, episodes, norm_stats, action_norm_stats):
+        config = _smoke_config(Condition.A1_RECENT)
+        dataset = RoboticsDataset(
+            episodes,
+            config,
+            norm_stats,
+            action_norm_stats=action_norm_stats,
+            split="train",
+        )
+        sample = dataset[0]
+        expected = action_norm_stats.normalize(episodes[0].actions[:4])
+        np.testing.assert_allclose(sample["action_chunk"].numpy(), expected, atol=1e-5)
+
 
 # ---------------------------------------------------------------------------
 # Collate function tests
@@ -211,14 +230,19 @@ class TestCollateFn:
 # ---------------------------------------------------------------------------
 
 class TestDataLoaderIntegration:
-    def test_create_dataloaders(self, episodes, norm_stats):
+    def test_create_dataloaders(self, episodes, norm_stats, action_norm_stats):
         config = ExperimentConfig(
             condition=Condition.A1_RECENT,
             training=TrainingParams(batch_size=4, num_workers=0),
         )
         train_eps, val_eps, test_eps = split_episodes(episodes, seed=42)
         train_loader, val_loader, test_loader = create_dataloaders(
-            train_eps, val_eps, test_eps, config, norm_stats
+            train_eps,
+            val_eps,
+            test_eps,
+            config,
+            norm_stats,
+            action_norm_stats=action_norm_stats,
         )
         batch = next(iter(train_loader))
         assert batch["proprio"].shape[0] <= 4
