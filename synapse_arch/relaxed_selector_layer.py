@@ -30,6 +30,7 @@ class _RelaxedSelectorFunction(torch.autograd.Function):
         lr = 0.5
         
         for _ in range(100):
+            y_prev = y.clone()
             # Gradient step towards the unconstrained optimum
             y = y - lr * (y - x)
             
@@ -49,16 +50,24 @@ class _RelaxedSelectorFunction(torch.autograd.Function):
             
             y = y.clamp(0, 1)
             y[:, 0] = 0.0  # y_1 = 0 constraint
+            
+            # 3. Early convergence check to avoid wasting GPU cycles
+            if torch.allclose(y, y_prev, atol=1e-4):
+                break
 
-        ctx.save_for_backward(y)
+        ctx.save_for_backward(y.clone())
         return y
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
-        # Straight-Through Estimator (STE) proxy:
-        # We pass the gradient directly through the selector to provide a stronger
-        # training signal to the event encoder.
-        return grad_output, None, None, None, None
+        y = ctx.saved_tensors[0]
+        # Softened Straight-Through Estimator (STE) proxy:
+        # We dampen the gradient for values that are heavily saturated (0 or 1).
+        # This prevents large raw gradients from destroying the optimization landscape 
+        # while preserving a strong training signal.
+        soft_derivative = 1.0 - torch.abs(y - 0.5) * 1.5
+        soft_derivative = soft_derivative.clamp(min=0.1)
+        return grad_output * soft_derivative, None, None, None, None
 
 
 class RelaxedSelectorLayer(nn.Module):

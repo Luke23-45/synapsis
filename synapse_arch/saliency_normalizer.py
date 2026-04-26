@@ -10,16 +10,25 @@ class SaliencyNormalizer(nn.Module):
         self.eps = eps
         self.log_temperature = nn.Parameter(torch.zeros(1))
 
-    def forward(self, event_scores: torch.Tensor) -> torch.Tensor:
-        csum = torch.cumsum(event_scores, dim=1)
-        csum_sq = torch.cumsum(event_scores * event_scores, dim=1)
-        steps = torch.arange(1, event_scores.shape[1] + 1, device=event_scores.device, dtype=event_scores.dtype)
-        mean = csum / steps.unsqueeze(0)
-        var = torch.clamp(csum_sq / steps.unsqueeze(0) - mean * mean, min=0.0)
+    def forward(self, event_scores: torch.Tensor, padding_mask: torch.Tensor | None = None) -> torch.Tensor:
+        if padding_mask is None:
+            padding_mask = torch.ones_like(event_scores, dtype=torch.bool)
+            
+        valid_scores = event_scores * padding_mask.type_as(event_scores)
+        
+        csum = torch.cumsum(valid_scores, dim=1)
+        csum_sq = torch.cumsum(valid_scores * valid_scores, dim=1)
+        
+        steps = torch.cumsum(padding_mask.type_as(event_scores), dim=1).clamp_min(1.0)
+        
+        mean = csum / steps
+        var = torch.clamp(csum_sq / steps - mean * mean, min=0.0)
         std = torch.sqrt(var + self.eps)
         z = (event_scores - mean) / std
         temp = torch.exp(self.log_temperature).clamp(min=0.25, max=4.0)
+        
         out = torch.sigmoid(z / temp) * event_scores
         out = out.clone()
-        out[:, 0] = 0.0
+        out = out.masked_fill(~padding_mask, 0.0)
+        out[:, 0] = -1e9  # Mask applied safely after normalization
         return out

@@ -219,7 +219,7 @@ class Trainer:
         self,
         pred_outputs,
         target_actions: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         action_mse = F.mse_loss(pred_outputs.pred_actions, target_actions)
         alpha_sparsity = _aux_weight_schedule(
             self.state.epoch,
@@ -233,12 +233,21 @@ class Trainer:
             self.loss_config.aux_ramp_start,
             self.loss_config.aux_ramp_end,
         )
+        
+        loss_dict = {"action_mse": action_mse}
         total_loss = action_mse
+        
         if alpha_sparsity > 0.0:
-            total_loss = total_loss + alpha_sparsity * sparsity_loss(pred_outputs.y_star)
+            s_loss = sparsity_loss(pred_outputs.y_star)
+            loss_dict["sparsity_loss"] = s_loss
+            total_loss = total_loss + alpha_sparsity * s_loss
+            
         if alpha_topo > 0.0:
-            total_loss = total_loss + alpha_topo * topology_reg_loss(pred_outputs.topology_token)
-        return total_loss, action_mse
+            t_loss = topology_reg_loss(pred_outputs.topology_token)
+            loss_dict["topo_loss"] = t_loss
+            total_loss = total_loss + alpha_topo * t_loss
+            
+        return total_loss, loss_dict
 
     def train_epoch(self) -> Dict[str, float]:
         """Run one training epoch.
@@ -250,6 +259,8 @@ class Trainer:
         self.model.train()
         total_loss = 0.0
         total_action_mse = 0.0
+        total_sparsity_loss = 0.0
+        total_topo_loss = 0.0
         total_phase_correct = 0
         total_phase_total = 0
         n_batches = 0
@@ -278,14 +289,19 @@ class Trainer:
                 if hasattr(self.model, "forward_train") and self.config.condition.uses_synapse:
                     pred_outputs = self.model.forward_train(batch)
                     pred_actions = pred_outputs.pred_actions
-                    total_loss_val, action_loss = self._synapse_loss(
+                    total_loss_val, loss_dict = self._synapse_loss(
                         pred_outputs,
                         batch["action_chunk"],
                     )
+                    action_loss = loss_dict["action_mse"]
+                    sparsity_val = loss_dict.get("sparsity_loss", torch.tensor(0.0, device=self.device))
+                    topo_val = loss_dict.get("topo_loss", torch.tensor(0.0, device=self.device))
                 else:
                     pred_actions = self.model(batch)
                     action_loss = F.mse_loss(pred_actions, batch["action_chunk"])
                     total_loss_val = self.action_loss_weight * action_loss
+                    sparsity_val = torch.tensor(0.0, device=self.device)
+                    topo_val = torch.tensor(0.0, device=self.device)
 
             self.scaler.scale(total_loss_val).backward()
             
@@ -308,23 +324,31 @@ class Trainer:
 
             total_loss += total_loss_val.item()
             total_action_mse += action_loss.item()
+            total_sparsity_loss += sparsity_val.item()
+            total_topo_loss += topo_val.item()
             n_batches += 1
             batch_times_s.append(time.perf_counter() - batch_start)
             samples_seen += batch["proprio"].shape[0]
 
             # Update progress bar postfix
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(self.train_loader):
-                pbar.set_postfix({
+                postfix = {
                     "loss": f"{total_loss_val.item():.4f}",
                     "mse": f"{action_loss.item():.4f}",
-                    "grad": f"{grad_norm:.2f}",
-                    "lr": f"{self.optimizer.param_groups[0]['lr']:.2e}",
-                })
+                }
+                if self.config.condition.uses_synapse:
+                    postfix["sparse"] = f"{sparsity_val.item():.4f}"
+                    postfix["topo"] = f"{topo_val.item():.4f}"
+                postfix["grad"] = f"{grad_norm:.2f}"
+                postfix["lr"] = f"{self.optimizer.param_groups[0]['lr']:.2e}"
+                pbar.set_postfix(postfix)
 
         pbar.close()
 
         avg_loss = total_loss / max(1, n_batches)
         avg_mse = total_action_mse / max(1, n_batches)
+        avg_sparsity = total_sparsity_loss / max(1, n_batches)
+        avg_topo = total_topo_loss / max(1, n_batches)
         current_lr = self.optimizer.param_groups[0]["lr"]
         mean_batch_time = sum(batch_times_s) / max(1, len(batch_times_s))
         samples_per_second = samples_seen / max(1e-6, sum(batch_times_s))
@@ -334,6 +358,8 @@ class Trainer:
         return {
             "train_loss": avg_loss,
             "action_mse": avg_mse,
+            "sparsity_loss": avg_sparsity,
+            "topo_loss": avg_topo,
             "lr": current_lr,
             "samples_per_second": samples_per_second,
             "mean_batch_time": mean_batch_time,
@@ -407,14 +433,18 @@ class Trainer:
 
             val_mse = val_metrics["val_action_mse"]
 
-            log.info(
-                "Epoch %3d | train_mse=%.6f | val_mse=%.6f | lr=%.2e | %.1f samples/s",
-                epoch,
-                train_metrics["action_mse"],
-                val_mse,
-                train_metrics["lr"],
-                train_metrics["samples_per_second"],
+            log_msg = (
+                f"Epoch {epoch:3d} | train_total={train_metrics['train_loss']:.6f} | "
+                f"train_mse={train_metrics['action_mse']:.6f} | val_mse={val_mse:.6f}"
             )
+            if self.config.condition.uses_synapse:
+                log_msg += (
+                    f" | train_sparse={train_metrics['sparsity_loss']:.6f} "
+                    f"| train_topo={train_metrics['topo_loss']:.6f}"
+                )
+            log_msg += f" | lr={train_metrics['lr']:.2e} | {train_metrics['samples_per_second']:.1f} samples/s"
+            
+            log.info(log_msg)
 
             # Early stopping check
             if val_mse < self.state.best_val_loss:

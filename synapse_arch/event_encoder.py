@@ -23,6 +23,4 @@ class EventEncoder(nn.Module):
         hidden = self.transition(pair)
         # Output raw logits for BCEWithLogitsLoss
         scores = self.score_head(hidden).squeeze(-1)
-        scores = scores.clone()
-        scores[:, 0] = -1e9  # Very negative logit for t=0
         return hidden, scores

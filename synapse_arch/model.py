@@ -104,7 +104,8 @@ class SynapseEndToEndModel(nn.Module):
         structured_history = batch["structured_history"]
         structured_state = batch["structured_state"]
         _, event_scores = self.event_encoder(structured_history)
-        saliency_scores = self.saliency_normalizer(event_scores)
+        history_mask = batch.get("history_mask")
+        saliency_scores = self.saliency_normalizer(event_scores, history_mask)
         saliency_scores = self._mask_saliency(saliency_scores, batch)
         y_star = self.relaxed_selector(saliency_scores)
         soft_vectors = self._soft_anchor_vectors(structured_history, saliency_scores)

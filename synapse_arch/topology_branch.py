@@ -46,7 +46,9 @@ class TopologyBranch(nn.Module):
     def surrogate(self, lifted_tokens: torch.Tensor, activations: torch.Tensor) -> torch.Tensor:
         weights = activations.unsqueeze(-1)
         weighted = lifted_tokens * weights
-        denom = weights.sum(dim=1, keepdim=True).clamp_min(1e-6)
+        # FIX: Clamping denom to 1.0 instead of 1e-6 prevents gradient explosion
+        # when the selector outputs highly sparse activations (sum < 1.0).
+        denom = weights.sum(dim=1, keepdim=True).clamp_min(1.0)
         centroid = weighted.sum(dim=1) / denom.squeeze(1)
         diffs = lifted_tokens - centroid.unsqueeze(1)
         pairwise = torch.cdist(lifted_tokens, lifted_tokens)
