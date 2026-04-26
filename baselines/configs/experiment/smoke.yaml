@@ -1,0 +1,67 @@
+# SYNAPSE Phase 4 — Smoke Test
+# Quick validation with smallest dataset (PushT, ~7 MB)
+# Should complete in ~5 minutes
+#
+# Uses real HuggingFace data — download first: python download_datasets.py --datasets pusht
+
+condition: B_synapse
+seed: 42
+experiment_name: phase4_smoke
+
+transformer:
+  d_model: 128
+  num_heads: 4
+  num_layers: 2
+  ffn_ratio: 4
+  dropout: 0.1
+  activation: gelu
+
+training:
+  max_epochs: 5
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.01
+  warmup_steps: 50
+  early_stopping_patience: 3
+  gradient_clip_norm: 1.0
+  use_amp: false
+  num_workers: 0
+
+data:
+  proprio_dim: 2
+  action_dim: 2
+  action_chunk_size: 4
+  history_window: 20
+  max_episode_length: 300
+  num_phases: 3
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+synapse:
+  K: 5
+  r: 2
+  tau: 0.5
+  weights: [1.0, 1.0, 1.0, 1.0]
+  Q: 1
+
+stats:
+  num_seeds_primary: 1
+  num_seeds_ablation: 1
+  significance_level: 0.05
+  num_bootstrap_samples: 100
+  rollout_steps: 5
+
+# Smoke test uses PushT only (smallest dataset at ~7 MB)
+datasets:
+  - name: pusht
+    source: lerobot
+    dataset_root: data/datasets
+    proprio_dim: 2
+    action_dim: 2
+    max_episode_length: 300
+    num_phases: 3
+    fps: 10
+    max_episodes: 20
+
+output_dir: output

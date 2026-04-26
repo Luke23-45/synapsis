@@ -39,9 +39,9 @@ training:
   early_stopping_patience: 40
   val_check_interval: 5
   num_seeds: 5
-  use_amp: false
+  use_amp: true
   compile_model: false
-  num_workers: 0
+  num_workers: 2
   pin_memory: true
   max_train_batches: null
   max_eval_batches: null

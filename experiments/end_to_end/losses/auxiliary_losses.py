@@ -35,27 +35,33 @@ def sparsity_loss(y_star: torch.Tensor) -> torch.Tensor:
     return per_seq_l1.mean()
 
 
-def topology_reg_loss(topology_token: torch.Tensor) -> torch.Tensor:
+def topology_reg_loss(topology_token: torch.Tensor, target_std: float = 1.0) -> torch.Tensor:
     """Prevent topology branch from collapsing to a constant.
 
-    If the topology branch outputs the same vector for every sequence
-    in the batch, the variance across the batch dimension is zero and
-    this loss diverges → strong corrective gradient signal.
+    Uses a Hinge loss on the standard deviation (similar to VICReg) to
+    maintain a healthy feature variance across the batch. This avoids the
+    violent gradient explosions (1e6+) caused by -log(x) when var -> 0.
 
     Parameters
     ----------
     topology_token : torch.Tensor
         Shape (B, d_model). Topology features for each sequence in batch.
+    target_std : float
+        The target standard deviation to maintain across the batch dimension.
 
     Returns
     -------
     torch.Tensor
-        Scalar loss: -log(mean variance across features + eps).
+        Scalar loss: mean(ReLU(target_std - std_across_batch)).
     """
     if topology_token.shape[0] < 2:
-        # Cannot compute variance with a single sample
         return torch.tensor(0.0, device=topology_token.device, dtype=topology_token.dtype)
 
-    # Variance across batch dimension for each feature, then mean
-    feature_var = topology_token.var(dim=0).mean()  # scalar
-    return -torch.log(feature_var + 1e-6)
+    # Variance across batch dimension, then std dev
+    # Add eps inside sqrt for numerical stability
+    var = topology_token.var(dim=0)
+    std = torch.sqrt(var + 1e-4)
+    
+    # Hinge loss: pushes std up to target_std, then stops
+    # Gradient is bounded to exactly -1.0 (or 0), eliminating explosion
+    return torch.mean(torch.relu(target_std - std))

@@ -392,7 +392,7 @@ def train(
     history: List[Dict[str, float]] = []
     
     # Mixed precision scaler
-    scaler = torch.cuda.amp.GradScaler(enabled=config.use_amp)
+    scaler = torch.amp.GradScaler(device.type, enabled=config.use_amp)
 
     log.info(
         "Starting training: %d epochs, %d batches/epoch (%d effective)",

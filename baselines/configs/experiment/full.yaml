@@ -1,0 +1,104 @@
+# SYNAPSE Phase 4 — Full Cross-Domain Baselines Experiment
+# =========================================================
+# 3 public HuggingFace datasets × 5 conditions × 5 seeds (primary) / 3 seeds (ablation)
+#
+# ALL datasets are publicly available and reproducible.
+# No custom/synthetic data in the baselines — those go in the deployment section.
+
+condition: B_synapse
+seed: 42
+experiment_name: phase4_cross_domain
+
+synapse:
+  K: 10
+  r: 3
+  tau: 0.5
+  weights: [1.0, 1.0, 1.0, 1.0]
+  Q: 1
+  alpha: 0.0
+  max_edge_length: null
+
+transformer:
+  d_model: 256
+  num_heads: 8
+  num_layers: 4
+  ffn_ratio: 4
+  dropout: 0.1
+  activation: gelu
+
+training:
+  max_epochs: 200
+  batch_size: 64
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  warmup_steps: 500
+  early_stopping_patience: 10
+  gradient_clip_norm: 1.0
+  use_amp: true
+  num_workers: 4
+
+data:
+  proprio_dim: 14            # Largest across datasets (ALOHA)
+  action_dim: 14             # Largest across datasets (ALOHA)
+  action_chunk_size: 8
+  history_window: 50
+  max_episode_length: 400
+  num_phases: 4
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+stats:
+  num_seeds_primary: 5
+  num_seeds_ablation: 3
+  significance_level: 0.05
+  confidence_level: 0.95
+  num_bootstrap_samples: 10000
+  rollout_steps: 10
+
+# ═══════════════════════════════════════════════════════════
+# DATASETS: Public HuggingFace benchmarks ONLY
+# ═══════════════════════════════════════════════════════════
+datasets:
+  # D1: PushT — Canonical Diffusion Policy benchmark
+  # 2D non-prehensile pushing, 206 episodes, state=2, action=2
+  # Citation: Chi et al., IJRR 2024
+  - name: pusht
+    source: lerobot
+    dataset_root: data/datasets
+    proprio_dim: 2
+    action_dim: 2
+    max_episode_length: 300
+    num_phases: 3
+    fps: 10
+    batch_size_override: 128
+
+  # D2: ALOHA Transfer Cube — Bimanual manipulation benchmark
+  # Cube handover between two arms, 50 episodes, state=14, action=14
+  # Citation: Zhao et al., RSS 2023
+  - name: aloha_transfer
+    source: lerobot
+    dataset_root: data/datasets
+    proprio_dim: 14
+    action_dim: 14
+    max_episode_length: 400
+    num_phases: 4
+    fps: 50
+    batch_size_override: 64
+
+  # D3: xArm Lift — Single-arm object lifting benchmark
+  # Medium difficulty lifting task, ~100 episodes, state=4, action=3
+  # Citation: Hansen et al., TDMPC 2022
+  - name: xarm_lift
+    source: lerobot
+    dataset_root: data/datasets
+    proprio_dim: 4
+    action_dim: 3
+    max_episode_length: 250
+    num_phases: 3
+    fps: 15
+    batch_size_override: 128
+
+output_dir: output

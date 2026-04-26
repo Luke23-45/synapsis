@@ -452,6 +452,8 @@ def solve_relaxed_selector(
     return y_star
 
 
+_osqp_cache = {}
+
 def _solve_osqp(
     P: np.ndarray,
     q: np.ndarray,
@@ -466,63 +468,70 @@ def _solve_osqp(
     try:
         import osqp
     except ImportError:
-        warnings.warn("osqp not installed, falling back to scipy", RuntimeWarning)
-        return _solve_scipy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+        warnings.warn("osqp not installed, falling back to cvxpy", RuntimeWarning)
+        return _solve_cvxpy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
 
-    # OSQP form: minimize ½ xᵀPx + qᵀx  s.t. l ≤ Ax ≤ u
-    # Stack inequality and equality into A_osqp
-    n_ineq = A_ub.shape[0] if A_ub.size else 0
-    n_eq = A_eq.shape[0] if A_eq.size else 0
+    global _osqp_cache
+    # Cache key based on the problem dimensions (T) and constraints
+    # K and r are captured implicitly via the shapes and contents of A_ub, b_ub
+    # lam is captured via P[0,0]
+    cache_key = (T, float(P[0, 0]), float(b_ub[0]) if b_ub.size else 0.0, A_ub.shape[0])
 
-    # Build A: [A_ub; A_eq; I (for bounds)]
-    # Bounds as inequality: y_t ≥ 0 → -y_t ≤ 0, y_t ≤ 1
-    A_list = []
-    l_list = []
-    u_list = []
+    if cache_key not in _osqp_cache:
+        # OSQP form: minimize ½ xᵀPx + qᵀx  s.t. l ≤ Ax ≤ u
+        n_ineq = A_ub.shape[0] if A_ub.size else 0
+        n_eq = A_eq.shape[0] if A_eq.size else 0
 
-    # Inequality: A_ub y ≤ b_ub  →  l = -inf, u = b_ub
-    if n_ineq > 0:
-        A_list.append(A_ub)
-        l_list.append(np.full(n_ineq, -np.inf))
-        u_list.append(b_ub)
+        A_list = []
+        l_list = []
+        u_list = []
 
-    # Equality: A_eq y = b_eq  →  l = u = b_eq
-    if n_eq > 0:
-        A_list.append(A_eq)
-        l_list.append(b_eq)
-        u_list.append(b_eq)
+        if n_ineq > 0:
+            A_list.append(A_ub)
+            l_list.append(np.full(n_ineq, -np.inf))
+            u_list.append(b_ub)
 
-    # Bounds: 0 ≤ y_t ≤ 1
-    A_list.append(np.eye(T))
-    l_list.append(np.zeros(T))
-    u_list.append(np.ones(T))
+        if n_eq > 0:
+            A_list.append(A_eq)
+            l_list.append(b_eq)
+            u_list.append(b_eq)
 
-    A_osqp = np.vstack(A_list)
-    l_osqp = np.concatenate(l_list)
-    u_osqp = np.concatenate(u_list)
+        A_list.append(np.eye(T))
+        l_list.append(np.zeros(T))
+        u_list.append(np.ones(T))
 
-    # OSQP expects sparse matrices
-    from scipy.sparse import csc_matrix
-    P_sparse = csc_matrix(P)
-    A_sparse = csc_matrix(A_osqp)
+        A_osqp = np.vstack(A_list)
+        l_osqp = np.concatenate(l_list)
+        u_osqp = np.concatenate(u_list)
 
-    prob = osqp.OSQP()
-    prob.setup(P_sparse, q, A_sparse, l_osqp, u_osqp,
-               verbose=False, eps_abs=1e-9, eps_rel=1e-9, max_iter=10000)
+        from scipy.sparse import csc_matrix
+        P_sparse = csc_matrix(P)
+        A_sparse = csc_matrix(A_osqp)
+
+        prob = osqp.OSQP()
+        prob.setup(P_sparse, q, A_sparse, l_osqp, u_osqp,
+                   verbose=False, eps_abs=1e-9, eps_rel=1e-9, max_iter=10000)
+        _osqp_cache[cache_key] = prob
+    else:
+        prob = _osqp_cache[cache_key]
+        prob.update(q=q)
+
     res = prob.solve()
 
     if res.info.status_val not in (1, 2):  # 1 = solved, 2 = solved inaccurate
         warnings.warn(
             f"OSQP solver failed with status: {res.info.status}. "
-            f"Falling back to scipy.",
+            f"Falling back to cvxpy.",
             RuntimeWarning
         )
-        return _solve_scipy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
+        return _solve_cvxpy(P, q, A_ub, b_ub, A_eq, b_eq, bounds, T)
 
     return res.x.astype(np.float64)
 
 
-def _solve_scipy(
+_cvxpy_cache = {}
+
+def _solve_cvxpy(
     P: np.ndarray,
     q: np.ndarray,
     A_ub: np.ndarray,
@@ -532,73 +541,51 @@ def _solve_scipy(
     bounds: list,
     T: int,
 ) -> np.ndarray:
-    """Solve QP using scipy.optimize.minimize (trust-constr with Hessian)."""
-    from scipy.optimize import minimize as sp_minimize, LinearConstraint
-
-    def objective(y):
-        return 0.5 * y @ P @ y + q @ y
-
-    def jac(y):
-        return P @ y + q
-
-    def hess(y):
-        return P
-
-    # Build LinearConstraint objects for trust-constr
-    constraints = []
-
-    # Inequality: A_ub y ≤ b_ub  →  -inf ≤ A_ub y ≤ b_ub
-    n_ineq = A_ub.shape[0] if A_ub.size else 0
-    if n_ineq > 0:
-        constraints.append(LinearConstraint(A_ub, -np.inf, b_ub))
-
-    # Equality: A_eq y = b_eq  →  b_eq ≤ A_eq y ≤ b_eq
-    n_eq = A_eq.shape[0] if A_eq.size else 0
-    if n_eq > 0:
-        constraints.append(LinearConstraint(A_eq, b_eq, b_eq))
-
-    y0 = np.zeros(T, dtype=np.float64)
-
-    # Try trust-constr first (handles QPs well with Hessian)
-    import warnings as _warnings
+    """Solve QP using CVXPY (extremely fast fallback when OSQP is missing)."""
     try:
+        import cvxpy as cp
+    except ImportError:
+        raise RuntimeError(
+            "Neither 'osqp' nor 'cvxpy' is installed. The Z2 Relaxed Selector requires "
+            "a mathematical solver for empirical verification. Please run: pip install osqp cvxpy"
+        )
+
+    global _cvxpy_cache
+    cache_key = (T, float(P[0, 0]), float(b_ub[0]) if b_ub.size else 0.0, A_ub.shape[0])
+
+    if cache_key not in _cvxpy_cache:
+        y = cp.Variable(T)
+        q_param = cp.Parameter(T)
+        
+        # P is diagonal (2*lam*I), so 0.5 * y^T P y == lam * sum(y^2)
+        lam_val = P[0, 0] / 2.0
+        objective = cp.Minimize(lam_val * cp.sum_squares(y) + q_param @ y)
+        
+        constraints = [y >= 0, y <= 1]
+        
+        if A_ub.size > 0:
+            constraints.append(A_ub @ y <= b_ub)
+        if A_eq.size > 0:
+            constraints.append(A_eq @ y == b_eq)
+            
+        prob = cp.Problem(objective, constraints)
+        _cvxpy_cache[cache_key] = (prob, y, q_param)
+    else:
+        prob, y, q_param = _cvxpy_cache[cache_key]
+
+    q_param.value = q
+    try:
+        import warnings as _warnings
         with _warnings.catch_warnings():
-            _warnings.simplefilter("ignore")  # Suppress Singular Jacobian warnings
-            result = sp_minimize(
-                objective, y0, jac=jac, hess=hess, method="trust-constr",
-                bounds=bounds, constraints=constraints,
-                options={"gtol": 1e-12, "maxiter": 2000, "verbose": 0},
-            )
-        if result.success:
-            return result.x.astype(np.float64)
-    except Exception:
-        pass
-
-    # Fallback: SLSQP (no Hessian support but works for smaller problems)
-    slsqp_constraints = []
-    if n_ineq > 0:
-        slsqp_constraints.append({
-            "type": "ineq",
-            "fun": lambda y: b_ub - A_ub @ y,
-            "jac": lambda y: -A_ub,
-        })
-    if n_eq > 0:
-        slsqp_constraints.append({
-            "type": "eq",
-            "fun": lambda y: A_eq @ y - b_eq,
-            "jac": lambda y: A_eq,
-        })
-
-    result = sp_minimize(
-        objective, y0, jac=jac, method="SLSQP",
-        bounds=bounds, constraints=slsqp_constraints,
-        options={"ftol": 1e-15, "maxiter": 5000, "disp": False},
-    )
-
-    if not result.success:
-        raise RuntimeError(f"scipy QP solver failed: {result.message}")
-
-    return result.x.astype(np.float64)
+            _warnings.simplefilter("ignore")
+            prob.solve(warm_start=True)
+            
+        if prob.status not in ["optimal", "optimal_inaccurate"]:
+            raise RuntimeError(f"CVXPY failed with status: {prob.status}")
+            
+        return np.clip(y.value, 0.0, 1.0).astype(np.float64)
+    except Exception as e:
+        raise RuntimeError(f"CVXPY fallback solver failed: {e}")
 
 
 # =======================================================================
