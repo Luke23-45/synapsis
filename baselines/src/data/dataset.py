@@ -217,7 +217,7 @@ class RoboticsDataset(Dataset):
             "dataset_sample_idx": torch.tensor(idx, dtype=torch.long),
         }
 
-        if self.condition.uses_synapse:
+        if self.config.uses_cached_synapse_features:
             if (
                 ep.synapse_anchors is not None
                 and ep.synapse_topo is not None

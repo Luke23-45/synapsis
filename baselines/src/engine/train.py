@@ -156,6 +156,16 @@ class Trainer:
             config.condition.value,
             self.model.num_trainable_params,
         )
+        self.uses_auxiliary_synapse_losses = bool(
+            config.uses_end_to_end_synapse and hasattr(self.model, "forward_train")
+        )
+        self.uses_cached_synapse_features = config.uses_cached_synapse_features
+        log.info(
+            "SYNAPSE pipeline: implementation=%s, cached_features=%s, auxiliary_losses=%s",
+            config.synapse_implementation.value,
+            self.uses_cached_synapse_features,
+            self.uses_auxiliary_synapse_losses,
+        )
         self._initialize_synapse_normalization()
 
         # Optimizer
@@ -215,7 +225,7 @@ class Trainer:
         )
 
     def _initialize_synapse_normalization(self) -> None:
-        if not self.config.condition.uses_synapse:
+        if not self.config.uses_end_to_end_synapse:
             return
         architecture = getattr(self.model, "architecture", None)
         normalized_lift = getattr(architecture, "normalized_lift", None)
@@ -223,10 +233,17 @@ class Trainer:
             return
 
         state_dim = self.config.structured_state_dim
+        dataset = getattr(self.train_loader, "dataset", None)
+        norm_stats = getattr(dataset, "norm_stats", None)
         mu = torch.zeros(state_dim + 3, device=self.device, dtype=torch.float32)
         sigma = torch.ones(state_dim + 3, device=self.device, dtype=torch.float32)
         mu[0] = 0.5
         sigma[0] = 0.29
+        if norm_stats is not None:
+            state_mean = torch.as_tensor(norm_stats.mean, device=self.device, dtype=torch.float32)
+            state_std = torch.as_tensor(norm_stats.std, device=self.device, dtype=torch.float32)
+            mu[1 : state_dim + 1] = state_mean
+            sigma[1 : state_dim + 1] = state_std.clamp_min(1e-6)
         mu[state_dim + 1] = 1.0
         sigma[state_dim + 1] = 1.0
         normalized_lift.set_normalization(mu, sigma)
@@ -319,7 +336,7 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
 
             with torch.autocast(device_type=self.device.type, enabled=self.use_amp, dtype=self.amp_dtype):
-                if hasattr(self.model, "forward_train") and self.config.condition.uses_synapse:
+                if self.uses_auxiliary_synapse_losses:
                     pred_outputs = self.model.forward_train(batch)
                     pred_actions = pred_outputs.pred_actions
                     total_loss_val, loss_dict = self._synapse_loss(
@@ -379,7 +396,7 @@ class Trainer:
                     "loss": f"{total_loss_val.item():.4f}",
                     "mse": f"{action_loss.item():.4f}",
                 }
-                if self.config.condition.uses_synapse:
+                if self.uses_auxiliary_synapse_losses:
                     postfix["sparse"] = f"{sparsity_val.item():.4f}"
                     postfix["topo"] = f"{topo_val.item():.4f}"
                     postfix["a_s"] = f"{alpha_sparsity:.3f}"
@@ -449,7 +466,7 @@ class Trainer:
             batch = {k: v.to(self.device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                      for k, v in batch.items()}
 
-            if hasattr(self.model, "forward_deploy") and self.config.condition.uses_synapse:
+            if self.config.uses_end_to_end_synapse and hasattr(self.model, "forward_deploy"):
                 pred_actions = self.model.forward_deploy(batch).pred_actions
             else:
                 pred_actions = self.model(batch)
@@ -498,7 +515,7 @@ class Trainer:
                 f"Epoch {epoch:3d} | train_total={train_metrics['train_loss']:.6f} | "
                 f"train_mse={train_metrics['action_mse']:.6f} | val_mse={val_mse:.6f}"
             )
-            if self.config.condition.uses_synapse:
+            if self.uses_auxiliary_synapse_losses:
                 log_msg += (
                     f" | train_sparse={train_metrics['sparsity_loss']:.6f} "
                     f"| train_topo={train_metrics['topo_loss']:.6f}"

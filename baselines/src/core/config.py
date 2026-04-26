@@ -68,6 +68,13 @@ class Condition(str, Enum):
         return self in (Condition.A2_UNIFORM, Condition.B_SYNAPSE, Condition.B_ANCHORS, Condition.B_TOPO)
 
 
+class SynapseImplementation(str, Enum):
+    """Which SYNAPSE model family a B-condition should use."""
+
+    CACHED = "cached"
+    END_TO_END = "end_to_end"
+
+
 @dataclass(frozen=True)
 class SynapseParams:
     """Parameters for the SYNAPSE memory operator M().
@@ -100,6 +107,7 @@ class TransformerParams:
     ffn_ratio: int = 4
     dropout: float = 0.1
     activation: str = "gelu"
+    event_encoder_hidden_dim: int = 64
 
 
 @dataclass(frozen=True)
@@ -198,6 +206,7 @@ class ExperimentConfig:
     """
 
     condition: Condition = Condition.B_SYNAPSE
+    synapse_implementation: SynapseImplementation = SynapseImplementation.CACHED
     seed: int = 42
     synapse: SynapseParams = field(default_factory=SynapseParams)
     transformer: TransformerParams = field(default_factory=TransformerParams)
@@ -226,6 +235,20 @@ class ExperimentConfig:
     def memory_Q(self) -> int:
         """Max homology degree — convenience accessor."""
         return self.synapse.Q
+
+    @property
+    def uses_end_to_end_synapse(self) -> bool:
+        return (
+            self.condition.uses_synapse
+            and self.synapse_implementation == SynapseImplementation.END_TO_END
+        )
+
+    @property
+    def uses_cached_synapse_features(self) -> bool:
+        return (
+            self.condition.uses_synapse
+            and self.synapse_implementation == SynapseImplementation.CACHED
+        )
 
     @property
     def topo_feature_dim(self) -> int:
@@ -309,6 +332,7 @@ class ExperimentConfig:
 
         return ExperimentConfig(
             condition=self.condition,
+            synapse_implementation=self.synapse_implementation,
             seed=self.seed,
             synapse=self.synapse,
             transformer=self.transformer,
@@ -323,6 +347,7 @@ class ExperimentConfig:
     def to_dict(self) -> dict:
         d = asdict(self)
         d["condition"] = self.condition.value
+        d["synapse_implementation"] = self.synapse_implementation.value
         d["synapse"]["weights"] = list(self.synapse.weights)
         # Convert DatasetSpec tuples
         d["datasets"] = [asdict(ds) for ds in self.datasets]
@@ -361,6 +386,7 @@ def _config_from_dict(raw: dict) -> ExperimentConfig:
 
     condition_str = raw.pop("condition", "B_synapse")
     condition = Condition(condition_str)
+    synapse_impl = SynapseImplementation(raw.pop("synapse_implementation", "cached"))
     seed = raw.pop("seed", 42)
     output_dir = raw.pop("output_dir", "output")
     experiment_name = raw.pop("experiment_name", "m1_utility_proof")
@@ -388,6 +414,7 @@ def _config_from_dict(raw: dict) -> ExperimentConfig:
 
     return ExperimentConfig(
         condition=condition,
+        synapse_implementation=synapse_impl,
         seed=seed,
         synapse=synapse,
         transformer=transformer,

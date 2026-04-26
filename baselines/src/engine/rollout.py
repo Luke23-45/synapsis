@@ -102,7 +102,7 @@ def rollout_evaluate(
     uses_synapse = bool(
         config is not None
         and hasattr(model, "forward_deploy")
-        and config.condition.uses_synapse
+        and config.uses_end_to_end_synapse
     )
 
     history = initial_batch.get("proprio_history")

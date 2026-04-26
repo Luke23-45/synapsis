@@ -22,7 +22,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.core.config import (
-    ExperimentConfig, Condition, SynapseParams, TransformerParams,
+    ExperimentConfig, Condition, SynapseImplementation, SynapseParams, TransformerParams,
     DataParams, TrainingParams,
 )
 from src.core.normalization import compute_normalization_stats
@@ -80,6 +80,35 @@ def _smoke_config(condition: Condition) -> ExperimentConfig:
             max_epochs=2, batch_size=4, learning_rate=1e-3,
             warmup_steps=5, early_stopping_patience=5,
             num_workers=0, use_amp=False,
+        ),
+    )
+
+
+def _smoke_e2e_config() -> ExperimentConfig:
+    return ExperimentConfig(
+        condition=Condition.B_SYNAPSE,
+        synapse_implementation=SynapseImplementation.END_TO_END,
+        seed=42,
+        synapse=SynapseParams(K=3, r=2, tau=0.3, lam=1.0, k=8, Q=1),
+        transformer=TransformerParams(
+            d_model=32,
+            num_heads=4,
+            num_layers=1,
+            event_encoder_hidden_dim=32,
+        ),
+        data=DataParams(
+            proprio_dim=22, action_dim=8, action_chunk_size=2, history_window=5,
+            max_episode_length=16,
+            ee_pose_dim=0, ee_vel_dim=0, object_pos_dim=0, grasp_dim=0,
+        ),
+        training=TrainingParams(
+            max_epochs=1, batch_size=2, learning_rate=1e-3,
+            warmup_steps=1, early_stopping_patience=2,
+            num_workers=0, use_amp=False,
+            sparsity_weight=0.01, topology_reg_weight=0.001,
+            aux_ramp_start=0, aux_ramp_end=1,
+            sparsity_ramp_start=0, sparsity_ramp_end=1,
+            topology_ramp_start=0, topology_ramp_end=1,
         ),
     )
 
@@ -196,6 +225,26 @@ class TestTrainingSmoke:
         assert trainer.sparsity_ramp_end == 3
         assert trainer.topology_ramp_start == 0
         assert trainer.topology_ramp_end == 1
+
+    def test_cached_synapse_disables_auxiliary_losses(self, tmp_path):
+        config = _smoke_config(Condition.B_SYNAPSE)
+        train_eps, val_eps, test_eps, norm_stats = _prepare_data(config)
+        train_loader, val_loader, _ = create_dataloaders(
+            train_eps, val_eps, test_eps, config, norm_stats
+        )
+        trainer = Trainer(config, train_loader, val_loader, tmp_path)
+        assert trainer.uses_cached_synapse_features is True
+        assert trainer.uses_auxiliary_synapse_losses is False
+
+    def test_end_to_end_synapse_enables_auxiliary_losses(self, tmp_path):
+        config = _smoke_e2e_config()
+        train_eps, val_eps, test_eps, norm_stats = _prepare_data(config)
+        train_loader, val_loader, _ = create_dataloaders(
+            train_eps, val_eps, test_eps, config, norm_stats
+        )
+        trainer = Trainer(config, train_loader, val_loader, tmp_path)
+        assert trainer.uses_cached_synapse_features is False
+        assert trainer.uses_auxiliary_synapse_losses is True
 
     @pytest.mark.parametrize("condition", [
         Condition.A1_RECENT, Condition.A2_UNIFORM, Condition.B_SYNAPSE,

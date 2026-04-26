@@ -5,6 +5,7 @@
 # Uses real HuggingFace data — download first: python download_datasets.py --datasets pusht
 
 condition: B_synapse
+synapse_implementation: end_to_end
 seed: 42
 experiment_name: phase4_smoke
 

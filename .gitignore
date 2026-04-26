@@ -57,7 +57,7 @@ $RECYCLE.BIN/
 
 ### --- LOGS & TEMPORARY ---
 *.log
-logs/
+# logs/
 *.tmp
 *.temp
 *.bak
@@ -68,7 +68,7 @@ outputs
 experiments/outputs
 TASKS.md
 legacy
-logs.md
+# logs.md
 applied_robotics
 working
 baselines/data

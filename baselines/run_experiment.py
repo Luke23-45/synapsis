@@ -149,6 +149,7 @@ def _run_dataset_experiment(
     config: ExperimentConfig,
     conditions: List[Condition],
     output_base: Path,
+    skip_cache: bool = False,
 ) -> Dict[str, dict]:
     """Run the full experiment for a single dataset.
 
@@ -191,9 +192,12 @@ def _run_dataset_experiment(
     )
     action_norm_stats.save(ds_output / "action_normalization_stats.pt")
 
-    # 5. Cache SYNAPSE features (if any B-conditions are requested)
-    synapse_conditions = [c for c in conditions if c.uses_synapse]
-    if synapse_conditions:
+    # 5. Cache SYNAPSE features only for the cached-feature implementation.
+    needs_cached_features = any(
+        c.uses_synapse and ds_config.uses_cached_synapse_features
+        for c in conditions
+    )
+    if needs_cached_features and not skip_cache:
         for split_name, split_eps in [
             ("train", train_eps),
             ("val", val_eps),
@@ -230,6 +234,12 @@ def _run_dataset_experiment(
                     ds_name, split_name, e,
                 )
 
+    elif needs_cached_features and skip_cache:
+        log.info(
+            "Skipping SYNAPSE feature caching for %s because --skip-cache was set",
+            ds_name,
+        )
+
     # 6. Train and evaluate each condition
     results: Dict[str, dict] = {}
 
@@ -241,6 +251,7 @@ def _run_dataset_experiment(
 
         cond_config = ExperimentConfig(
             condition=condition,
+            synapse_implementation=ds_config.synapse_implementation,
             seed=ds_config.seed,
             synapse=ds_config.synapse,
             transformer=ds_config.transformer,
@@ -574,7 +585,7 @@ def main() -> None:
         ds_start = time.time()
 
         results = _run_dataset_experiment(
-            ds_spec, config, conditions, output_base
+            ds_spec, config, conditions, output_base, skip_cache=args.skip_cache
         )
 
         ds_elapsed = time.time() - ds_start

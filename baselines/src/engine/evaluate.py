@@ -152,7 +152,7 @@ class Evaluator:
                 for k, v in batch.items()
             }
 
-            if hasattr(model, "forward_deploy") and self.config.condition.uses_synapse:
+            if self.config.uses_end_to_end_synapse and hasattr(model, "forward_deploy"):
                 deploy_out = model.forward_deploy(batch_device)
                 pred_actions = deploy_out.pred_actions
             else:

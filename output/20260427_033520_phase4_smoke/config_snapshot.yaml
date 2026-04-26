@@ -1,0 +1,88 @@
+condition: B_synapse
+synapse_implementation: end_to_end
+seed: 42
+synapse:
+  K: 5
+  r: 2
+  tau: 0.5
+  lam: 0.5
+  k: 32
+  weights:
+  - 1.0
+  - 1.0
+  - 1.0
+  - 1.0
+  Q: 1
+  alpha: 0.0
+  max_edge_length: null
+transformer:
+  d_model: 128
+  num_heads: 4
+  num_layers: 2
+  ffn_ratio: 4
+  dropout: 0.1
+  activation: gelu
+  event_encoder_hidden_dim: 64
+training:
+  max_epochs: 5
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  warmup_steps: 50
+  early_stopping_patience: 3
+  gradient_clip_norm: 1.0
+  use_amp: false
+  num_workers: 0
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  compile_model: false
+  fused_adamw: true
+  save_checkpoints: false
+  action_loss_weight: 1.0
+  sparsity_weight: 0.01
+  topology_reg_weight: 0.001
+  action_beta: 0.5
+  aux_ramp_start: 10
+  aux_ramp_end: 30
+  sparsity_ramp_start: null
+  sparsity_ramp_end: null
+  topology_ramp_start: null
+  topology_ramp_end: null
+data:
+  proprio_dim: 2
+  ee_pose_dim: 7
+  ee_vel_dim: 6
+  object_pos_dim: 3
+  grasp_dim: 1
+  action_dim: 2
+  action_chunk_size: 4
+  history_window: 20
+  max_episode_length: 300
+  num_phases: 3
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+stats:
+  num_seeds_primary: 1
+  num_seeds_ablation: 1
+  significance_level: 0.05
+  confidence_level: 0.95
+  num_bootstrap_samples: 100
+  rollout_steps: 5
+output_dir: output
+experiment_name: phase4_smoke
+datasets:
+- name: pusht
+  source: lerobot
+  dataset_root: data/datasets
+  local_path: null
+  proprio_dim: 2
+  action_dim: 2
+  max_episode_length: 300
+  num_phases: 3
+  fps: 10
+  batch_size_override: null
+  max_episodes: 20

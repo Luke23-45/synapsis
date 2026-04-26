@@ -23,21 +23,26 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.core.config import (
-    ExperimentConfig, Condition, SynapseParams, TransformerParams,
+    ExperimentConfig, Condition, SynapseImplementation, SynapseParams, TransformerParams,
     DataParams, TrainingParams,
 )
 from src.planner.planner_recent import PlannerRecent
 from src.planner.planner_uniform import PlannerUniform
 from src.planner.planner_synapse import PlannerSynapse, create_planner
+from src.planner.planner_synapse_e2e import PlannerSynapseEndToEnd
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_config(condition: Condition) -> ExperimentConfig:
+def _make_config(
+    condition: Condition,
+    synapse_implementation: SynapseImplementation = SynapseImplementation.CACHED,
+) -> ExperimentConfig:
     return ExperimentConfig(
         condition=condition,
+        synapse_implementation=synapse_implementation,
         seed=42,
         synapse=SynapseParams(K=5, r=2, tau=0.3, Q=1),
         transformer=TransformerParams(d_model=64, num_heads=4, num_layers=2),
@@ -83,6 +88,8 @@ def _make_batch(config: ExperimentConfig, B: int = 2, T: int = 30) -> dict:
         "structured_history": torch.randn(B, T, config.structured_state_dim),
         "action_chunk": torch.randn(B, config.data.action_chunk_size, config.data.action_dim),
         "history_length": torch.full((B,), T, dtype=torch.long),
+        "history_lengths": torch.full((B,), T, dtype=torch.long),
+        "history_mask": torch.ones(B, T, dtype=torch.bool),
     }
     if config.condition.uses_synapse:
         batch["synapse_anchors"] = torch.randn(B, config.synapse.K, config.anchor_feature_dim)
@@ -233,6 +240,74 @@ class TestAblationFlags:
         assert adapter.use_anchors is True
         assert adapter.use_topo is True
         assert adapter.num_output_tokens == config_b.synapse.K + 1
+
+    def test_synapse_planner_uses_cached_features_not_structured_history(self, config_b):
+        model = PlannerSynapse(config_b)
+        model.eval()
+
+        batch = _make_batch(config_b, B=1, T=30)
+        batch["synapse_anchors"] = torch.randn(
+            1, config_b.synapse.K, config_b.anchor_feature_dim
+        )
+        batch["synapse_topo"] = torch.randn(1, config_b.topo_feature_dim)
+
+        changed_history = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        changed_history["structured_history"] = torch.randn_like(batch["structured_history"])
+        changed_history["structured_state"] = torch.randn_like(batch["structured_state"])
+
+        with torch.no_grad():
+            reference = model(batch)
+            altered_history = model(changed_history)
+
+        assert torch.allclose(reference, altered_history), (
+            "Baseline SYNAPSE planner should read cached SYNAPSE features, "
+            "not rebuild memory from structured_history."
+        )
+
+    def test_synapse_planner_output_changes_when_cached_features_change(self, config_b):
+        model = PlannerSynapse(config_b)
+        model.eval()
+
+        batch = _make_batch(config_b, B=1, T=30)
+        batch["synapse_anchors"] = torch.zeros(
+            1, config_b.synapse.K, config_b.anchor_feature_dim
+        )
+        batch["synapse_topo"] = torch.zeros(1, config_b.topo_feature_dim)
+
+        changed_features = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        changed_features["synapse_anchors"] = torch.randn_like(batch["synapse_anchors"])
+        changed_features["synapse_topo"] = torch.randn_like(batch["synapse_topo"])
+
+        with torch.no_grad():
+            reference = model(batch)
+            altered_features = model(changed_features)
+
+        assert not torch.allclose(reference, altered_features), (
+            "Changing cached SYNAPSE features should affect the transformer's output."
+        )
+
+
+class TestEndToEndPlanner:
+    def test_factory_creates_e2e_planner_when_requested(self):
+        config = _make_config(
+            Condition.B_SYNAPSE,
+            synapse_implementation=SynapseImplementation.END_TO_END,
+        )
+        model = create_planner(config)
+        assert isinstance(model, PlannerSynapseEndToEnd)
+
+    def test_e2e_forward_train_exposes_synapse_outputs(self):
+        config = _make_config(
+            Condition.B_SYNAPSE,
+            synapse_implementation=SynapseImplementation.END_TO_END,
+        )
+        model = create_planner(config)
+        batch = _make_batch(config, B=2, T=12)
+        with torch.no_grad():
+            output = model.forward_train(batch)
+        assert output.pred_actions.shape == (2, config.data.action_chunk_size, config.data.action_dim)
+        assert output.y_star.shape == (2, 12)
+        assert output.topology_token.shape[0] == 2
 
 
 # ---------------------------------------------------------------------------
