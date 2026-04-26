@@ -99,10 +99,42 @@ def rollout_evaluate(
     model.eval()
     config = getattr(model, "config", None)
 
-    # Clone history to avoid modifying the original
-    history = initial_batch["proprio_history"].clone().to(device)  # (B, T, D)
-    proprio = initial_batch["proprio"].clone().to(device)           # (B, D)
-    B, T, D = history.shape
+    uses_synapse = bool(
+        config is not None
+        and hasattr(model, "forward_deploy")
+        and config.condition.uses_synapse
+    )
+
+    history = initial_batch.get("proprio_history")
+    if history is not None:
+        history = history.clone().to(device)
+    structured_history = initial_batch.get("structured_history")
+    if structured_history is not None:
+        structured_history = structured_history.clone().to(device)
+    structured_state = initial_batch.get("structured_state")
+    if structured_state is not None:
+        structured_state = structured_state.clone().to(device)
+
+    if uses_synapse:
+        if structured_history is None or structured_state is None:
+            raise KeyError("SYNAPSE rollout requires 'structured_history' and 'structured_state'.")
+        B, _, D = structured_history.shape
+        history_lengths = initial_batch.get("history_lengths")
+        if history_lengths is None:
+            history_lengths = initial_batch.get("history_length")
+        if history_lengths is None:
+            history_lengths = torch.full(
+                (B,),
+                structured_history.shape[1],
+                dtype=torch.long,
+                device=device,
+            )
+        else:
+            history_lengths = history_lengths.clone().to(device)
+    else:
+        if history is None:
+            raise KeyError("Rollout requires 'proprio_history'.")
+        B, _, D = history.shape
 
     # SYNAPSE features (if applicable)
     synapse_anchors = initial_batch.get("synapse_anchors")
@@ -112,7 +144,7 @@ def rollout_evaluate(
     with torch.no_grad():
         open_loop_batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v
                           for k, v in initial_batch.items()}
-        if config is not None and hasattr(model, "forward_deploy") and config.condition.uses_synapse:
+        if uses_synapse:
             open_loop_pred = model.forward_deploy(open_loop_batch).pred_actions
         else:
             open_loop_pred = model(open_loop_batch)
@@ -138,16 +170,31 @@ def rollout_evaluate(
     for step in range(n_steps):
         with torch.no_grad():
             # Construct batch from current (potentially corrupted) history
-            batch = {
-                "proprio": history[:, -1, :],  # Last timestep as current
-                "proprio_history": history,
-            }
+            if uses_synapse:
+                max_len = structured_history.shape[1]
+                history_mask = (
+                    torch.arange(max_len, device=device).unsqueeze(0)
+                    < history_lengths.unsqueeze(1)
+                )
+                batch = {
+                    "structured_state": structured_state,
+                    "structured_history": structured_history,
+                    "history_lengths": history_lengths,
+                    "history_mask": history_mask,
+                }
+            else:
+                batch = {
+                    "proprio": history[:, -1, :],
+                    "proprio_history": history,
+                    "structured_state": history[:, -1, :],
+                    "structured_history": history,
+                }
             if synapse_anchors is not None:
                 batch["synapse_anchors"] = synapse_anchors.to(device)
                 batch["synapse_topo"] = synapse_topo.to(device)
 
             # Predict action
-            if config is not None and hasattr(model, "forward_deploy") and config.condition.uses_synapse:
+            if uses_synapse:
                 pred_action = model.forward_deploy(batch).pred_actions
             else:
                 pred_action = model(batch)
@@ -165,9 +212,13 @@ def rollout_evaluate(
 
             # Update history: append predicted proprioception
             # Use the first predicted action to simulate next proprio state
-            next_proprio = action_to_proprio_projection(pred_action[:, 0, :])
-            next_proprio = next_proprio.unsqueeze(1)  # (B, 1, D)
-            history = torch.cat([history, next_proprio], dim=1)  # (B, T+1, D)
+            next_state = action_to_proprio_projection(pred_action[:, 0, :]).unsqueeze(1)
+            if uses_synapse:
+                structured_history = torch.cat([structured_history, next_state], dim=1)
+                structured_state = next_state[:, 0, :]
+                history_lengths = history_lengths + 1
+            else:
+                history = torch.cat([history, next_state], dim=1)
 
     mse_curve = np.array(mse_per_step, dtype=np.float64)
 

@@ -60,6 +60,9 @@ class EMAModel:
         for name, param in model.named_parameters():
             if name in self.shadow:
                 param.data.copy_(self.shadow[name])
+        for name, buf in model.named_buffers():
+            if name in self.shadow_buffers:
+                buf.data.copy_(self.shadow_buffers[name])
 
     def state_dict(self) -> dict:
         """Serialize EMA state for checkpointing."""

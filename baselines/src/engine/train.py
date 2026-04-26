@@ -34,8 +34,13 @@ from src.planner.planner_synapse import create_planner
 from src.planner.planner import RoboticsPlannerBase
 from src.data.dataset import DataLoader
 
-# Import EMA from our robust Phase 3 codebase
+# Import EMA and auxiliary regularizers from our robust Phase 3 codebase
 from experiments.end_to_end.training.ema import EMAModel
+from experiments.end_to_end.losses.auxiliary_losses import (
+    sparsity_loss,
+    topology_reg_loss,
+)
+from experiments.end_to_end.losses.combined_loss import LossConfig
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +65,20 @@ def _cosine_warmup_scheduler(
         return max(0.0, 0.5 * (1.0 + torch.cos(torch.tensor(progress * 3.14159265)).item()))
 
     return LambdaLR(optimizer, lr_lambda)
+
+
+def _aux_weight_schedule(
+    epoch: int,
+    target_weight: float,
+    ramp_start: int,
+    ramp_end: int,
+) -> float:
+    if epoch < ramp_start:
+        return 0.0
+    if epoch >= ramp_end:
+        return target_weight
+    progress = (epoch - ramp_start) / max(ramp_end - ramp_start, 1)
+    return target_weight * progress
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +128,7 @@ class Trainer:
         self.val_loader = val_loader
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._best_model_state: Optional[Dict[str, torch.Tensor]] = None
 
         # Device
         self.device = torch.device(
@@ -125,6 +145,7 @@ class Trainer:
             config.condition.value,
             self.model.num_trainable_params,
         )
+        self._initialize_synapse_normalization()
 
         # Optimizer
         optimizer_kwargs = {
@@ -162,6 +183,62 @@ class Trainer:
         # Loss weights
         self.action_loss_weight = 1.0
         self.phase_loss_weight = 0.1  # Auxiliary task
+        self.loss_config = LossConfig()
+
+    def _initialize_synapse_normalization(self) -> None:
+        if not self.config.condition.uses_synapse:
+            return
+        architecture = getattr(self.model, "architecture", None)
+        normalized_lift = getattr(architecture, "normalized_lift", None)
+        if normalized_lift is None:
+            return
+
+        state_dim = self.config.structured_state_dim
+        mu = torch.zeros(state_dim + 3, device=self.device, dtype=torch.float32)
+        sigma = torch.ones(state_dim + 3, device=self.device, dtype=torch.float32)
+        mu[0] = 0.5
+        sigma[0] = 0.29
+        mu[state_dim + 1] = 1.0
+        sigma[state_dim + 1] = 1.0
+        normalized_lift.set_normalization(mu, sigma)
+
+    def _snapshot_ema_model(self) -> Dict[str, torch.Tensor]:
+        live_state = {
+            key: value.detach().cpu().clone()
+            for key, value in self.model.state_dict().items()
+        }
+        self.ema.apply_to(self.model)
+        ema_state = {
+            key: value.detach().cpu().clone()
+            for key, value in self.model.state_dict().items()
+        }
+        self.model.load_state_dict(live_state)
+        return ema_state
+
+    def _synapse_loss(
+        self,
+        pred_outputs,
+        target_actions: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        action_mse = F.mse_loss(pred_outputs.pred_actions, target_actions)
+        alpha_sparsity = _aux_weight_schedule(
+            self.state.epoch,
+            self.loss_config.sparsity_weight,
+            self.loss_config.aux_ramp_start,
+            self.loss_config.aux_ramp_end,
+        )
+        alpha_topo = _aux_weight_schedule(
+            self.state.epoch,
+            self.loss_config.topology_reg_weight,
+            self.loss_config.aux_ramp_start,
+            self.loss_config.aux_ramp_end,
+        )
+        total_loss = action_mse
+        if alpha_sparsity > 0.0:
+            total_loss = total_loss + alpha_sparsity * sparsity_loss(pred_outputs.y_star)
+        if alpha_topo > 0.0:
+            total_loss = total_loss + alpha_topo * topology_reg_loss(pred_outputs.topology_token)
+        return total_loss, action_mse
 
     def train_epoch(self) -> Dict[str, float]:
         """Run one training epoch.
@@ -199,11 +276,16 @@ class Trainer:
 
             with torch.autocast(device_type=self.device.type, enabled=self.use_amp, dtype=self.amp_dtype):
                 if hasattr(self.model, "forward_train") and self.config.condition.uses_synapse:
-                    pred_actions = self.model.forward_train(batch).pred_actions
+                    pred_outputs = self.model.forward_train(batch)
+                    pred_actions = pred_outputs.pred_actions
+                    total_loss_val, action_loss = self._synapse_loss(
+                        pred_outputs,
+                        batch["action_chunk"],
+                    )
                 else:
                     pred_actions = self.model(batch)
-                action_loss = F.mse_loss(pred_actions, batch["action_chunk"])
-                total_loss_val = self.action_loss_weight * action_loss
+                    action_loss = F.mse_loss(pred_actions, batch["action_chunk"])
+                    total_loss_val = self.action_loss_weight * action_loss
 
             self.scaler.scale(total_loss_val).backward()
             
@@ -280,8 +362,8 @@ class Trainer:
             batch = {k: v.to(self.device, non_blocking=True) if isinstance(v, torch.Tensor) else v
                      for k, v in batch.items()}
 
-            if hasattr(self.model, "forward_train") and self.config.condition.uses_synapse:
-                pred_actions = self.model.forward_train(batch).pred_actions
+            if hasattr(self.model, "forward_deploy") and self.config.condition.uses_synapse:
+                pred_actions = self.model.forward_deploy(batch).pred_actions
             else:
                 pred_actions = self.model(batch)
             action_loss = F.mse_loss(pred_actions, batch["action_chunk"])
@@ -338,6 +420,7 @@ class Trainer:
             if val_mse < self.state.best_val_loss:
                 self.state.best_val_loss = val_mse
                 self.state.patience_counter = 0
+                self._best_model_state = self._snapshot_ema_model()
                 if self.config.training.save_checkpoints:
                     self.save_checkpoint("best.pt")
                     log.info("  → New best val_mse=%.6f, checkpoint saved", val_mse)
@@ -355,7 +438,9 @@ class Trainer:
 
         self.state.elapsed_seconds = time.time() - start_time
         best_path = self.output_dir / "best.pt"
-        if best_path.exists() and self.config.training.save_checkpoints:
+        if self._best_model_state is not None:
+            self.model.load_state_dict(self._best_model_state)
+        elif best_path.exists() and self.config.training.save_checkpoints:
             self.load_checkpoint("best.pt")
         log.info(
             "Training complete: %d epochs, %.1fs, best_val_mse=%.6f",

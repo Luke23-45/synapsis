@@ -235,6 +235,10 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
     batch_size = len(batch)
     proprio_dim = batch[0]["proprio_history"].shape[1]
     structured_dim = batch[0]["structured_history"].shape[1]
+    history_lengths = torch.tensor(
+        [int(s["proprio_history"].shape[0]) for s in batch],
+        dtype=torch.long,
+    )
     padded_histories = torch.empty(
         batch_size,
         max_hist_len,
@@ -247,17 +251,25 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         structured_dim,
         dtype=batch[0]["structured_history"].dtype,
     )
+    history_mask = torch.zeros(
+        batch_size,
+        max_hist_len,
+        dtype=torch.bool,
+    )
 
     for row, sample in enumerate(batch):
         hist = sample["proprio_history"]
         struct = sample["structured_history"]
         hist_len = hist.shape[0]
+        history_mask[row, :hist_len] = True
         if hist_len < max_hist_len:
             pad_len = max_hist_len - hist_len
             padded_histories[row, :pad_len] = hist[:1, :].expand(pad_len, -1)
             padded_histories[row, pad_len:] = hist
-            padded_structured_histories[row, :pad_len] = struct[:1, :].expand(pad_len, -1)
-            padded_structured_histories[row, pad_len:] = struct
+            # SYNAPSE's train/deploy paths expect right-padding plus an explicit
+            # mask so that artificial timesteps never influence saliency.
+            padded_structured_histories[row, :hist_len] = struct
+            padded_structured_histories[row, hist_len:] = 0.0
         else:
             padded_histories[row] = hist
             padded_structured_histories[row] = struct
@@ -288,6 +300,8 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
             "history_length",
             lambda sample: int(sample["proprio_history"].shape[0]),
         ),
+        "history_lengths": history_lengths,
+        "history_mask": history_mask,
         "episode_idx": _stack_optional_long("episode_idx", lambda sample: -1),
         "dataset_sample_idx": _stack_optional_long("dataset_sample_idx", lambda sample: -1),
     }

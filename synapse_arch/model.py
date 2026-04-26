@@ -165,14 +165,25 @@ class SynapseEndToEndModel(nn.Module):
         structured_history = batch["structured_history"]
         structured_state = batch["structured_state"]
         history_lengths = batch.get("history_lengths")
+        if history_lengths is None:
+            history_lengths = batch.get("history_length")
+        history_mask = batch.get("history_mask")
         exact_states = []
         anchor_clouds = []
         topo_features = []
         deploy_activations_list = []
         pos_indices_list = []
         for batch_index, sequence in enumerate(structured_history.detach().cpu().numpy()):
-            actual_length = int(history_lengths[batch_index].item()) if history_lengths is not None else sequence.shape[0]
-            trimmed_sequence = np.asarray(sequence[:actual_length], dtype=np.float64)
+            if history_mask is not None:
+                sample_mask = history_mask[batch_index].detach().cpu().numpy().astype(bool)
+                trimmed_sequence = np.asarray(sequence[sample_mask], dtype=np.float64)
+                actual_length = int(sample_mask.sum())
+            else:
+                actual_length = int(history_lengths[batch_index].item()) if history_lengths is not None else sequence.shape[0]
+                trimmed_sequence = np.asarray(sequence[:actual_length], dtype=np.float64)
+            if actual_length < 1:
+                trimmed_sequence = np.asarray(sequence[:1], dtype=np.float64)
+                actual_length = 1
             exact_state = self._deploy_single(trimmed_sequence)
             exact_states.append(exact_state)
             cloud = exact_state.point_cloud.astype(np.float32)
