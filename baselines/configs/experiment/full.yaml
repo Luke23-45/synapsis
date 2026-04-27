@@ -11,9 +11,8 @@ seed: 42
 experiment_name: phase4_cross_domain
 
 synapse:
-  keep_all_anchors: true
-  K: 64
-  r: 0
+  K: 40
+  r: 3
   tau: 0.5
   weights: [1.0, 1.0, 1.0, 1.0]
   Q: 1

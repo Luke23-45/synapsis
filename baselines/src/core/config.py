@@ -92,7 +92,6 @@ class SynapseParams:
     Q: int = 1
     alpha: float = 0.0
     max_edge_length: Optional[float] = None
-    keep_all_anchors: bool = False
 
 
 @dataclass(frozen=True)
