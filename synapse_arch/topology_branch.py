@@ -33,6 +33,9 @@ def summarize_diagrams(diagrams: List[Any]) -> np.ndarray:
 
 
 class TopologyBranch(nn.Module):
+    NUM_SPECTRAL_SCALES = 4
+    NUM_SPECTRAL_EIGVALS = 4
+
     def __init__(self, lift_dim: int, summary_dim: int, hidden_dim: int) -> None:
         super().__init__()
         self.summary_dim = summary_dim
@@ -43,6 +46,14 @@ class TopologyBranch(nn.Module):
         )
         self.surrogate_proj = nn.Sequential(
             nn.Linear(12, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        # Differentiable spectral geometry features (replaces detached Gudhi)
+        spectral_feature_dim = self.NUM_SPECTRAL_SCALES * self.NUM_SPECTRAL_EIGVALS + 4
+        self.log_scales = nn.Parameter(torch.linspace(-1.5, 1.5, self.NUM_SPECTRAL_SCALES))
+        self.spectral_proj = nn.Sequential(
+            nn.Linear(spectral_feature_dim, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
@@ -118,3 +129,60 @@ class TopologyBranch(nn.Module):
     def exact(self, point_cloud: np.ndarray, Q: int, max_edge_length: float | None = None) -> tuple[List[Any], np.ndarray]:
         diagrams = compute_persistence_diagrams(point_cloud, Q, max_edge_length=max_edge_length)
         return diagrams, summarize_diagrams(diagrams)
+
+    def spectral_features(self, point_cloud: torch.Tensor, activations: torch.Tensor) -> torch.Tensor:
+        """Compute differentiable spectral topology features from the lifted point cloud.
+
+        Uses eigenvalues of the graph Laplacian at multiple learnable scales to
+        approximate persistent homology — fully differentiable so the action loss
+        can directly shape the point cloud geometry.
+
+        Parameters
+        ----------
+        point_cloud : (B, N, k)  lifted anchor positions
+        activations : (B, N)     anchor activation weights
+
+        Returns
+        -------
+        (B, d_model) projected spectral features
+        """
+        B, N, k = point_cloud.shape
+
+        # Force float32 for eigvalsh numerical stability
+        cloud_f32 = point_cloud.float()
+        act_f32 = activations.float()
+
+        mask = (act_f32 > 1e-3).float()
+        mask_2d = mask.unsqueeze(2) * mask.unsqueeze(1)
+
+        D = torch.cdist(cloud_f32, cloud_f32)
+        D = D * mask_2d
+
+        scales = torch.exp(self.log_scales.float())
+        num_eigvals = self.NUM_SPECTRAL_EIGVALS
+
+        features = []
+        for s_idx in range(self.NUM_SPECTRAL_SCALES):
+            sigma = scales[s_idx]
+            A = torch.exp(-D.square() / (2 * sigma.square() + 1e-8))
+            A = A * mask_2d
+
+            degree = A.sum(dim=-1)
+            L = torch.diag_embed(degree) - A
+            L = L + torch.eye(N, device=L.device).unsqueeze(0) * 1e-6
+
+            eigvals = torch.linalg.eigvalsh(L)
+            features.append(eigvals[:, :num_eigvals])
+
+        # Global distance statistics
+        tri_mask = torch.triu(mask_2d, diagonal=1)
+        tri_sum = tri_mask.sum(dim=(1, 2)).clamp_min(1)
+        mean_dist = (D * tri_mask).sum(dim=(1, 2)) / tri_sum
+        max_dist = (D * tri_mask).amax(dim=(1, 2))
+        dist_var = ((D - mean_dist[:, None, None]).square() * tri_mask).sum(dim=(1, 2)) / tri_sum
+        compactness = mean_dist / (max_dist + 1e-6)
+
+        features.append(torch.stack([mean_dist, max_dist, dist_var, compactness], dim=-1))
+
+        raw_features = torch.cat(features, dim=-1).to(point_cloud.dtype)
+        return self.spectral_proj(raw_features)
