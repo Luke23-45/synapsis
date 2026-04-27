@@ -21,6 +21,7 @@ import torch
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
+from synapse_arch.topology_branch import TopologyBranch
 
 from src.core.config import (
     ExperimentConfig, Condition, SynapseImplementation, SynapseParams, TransformerParams,
@@ -308,6 +309,14 @@ class TestEndToEndPlanner:
         assert output.pred_actions.shape == (2, config.data.action_chunk_size, config.data.action_dim)
         assert output.y_star.shape == (2, 12)
         assert output.topology_token.shape[0] == 2
+
+    def test_topology_surrogate_summary_uses_distinct_features(self):
+        branch = TopologyBranch(lift_dim=8, summary_dim=8, hidden_dim=16)
+        lifted = torch.randn(2, 6, 8)
+        activations = torch.rand(2, 6)
+        summary = branch._surrogate_summary(lifted, activations)
+        assert summary.shape == (2, 8)
+        assert not torch.allclose(summary[:, :4], summary[:, 4:8])
 
 
 # ---------------------------------------------------------------------------

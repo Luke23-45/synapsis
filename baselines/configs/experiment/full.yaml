@@ -40,15 +40,11 @@ training:
   use_amp: true
   num_workers: 4
   action_loss_weight: 1.0
-  sparsity_weight: 0.01
-  topology_reg_weight: 0.001
+  sparsity_weight: 0.1
+  topology_reg_weight: 0.2
   action_beta: 0.5
-  aux_ramp_start: 10
-  aux_ramp_end: 30
-  sparsity_ramp_start: 10
-  sparsity_ramp_end: 30
-  topology_ramp_start: 0
-  topology_ramp_end: 10
+  aux_ramp_start: 2
+  aux_ramp_end: 10
 
 data:
   proprio_dim: 14            # Largest across datasets (ALOHA)

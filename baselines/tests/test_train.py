@@ -184,9 +184,10 @@ class TestTrainingSmoke:
         assert torch.isclose(total_loss, expected_action)
 
     def test_trainer_uses_aux_schedule_from_config(self, tmp_path):
-        config = _smoke_config(Condition.B_SYNAPSE)
+        config = _smoke_e2e_config()
         config = ExperimentConfig(
             condition=config.condition,
+            synapse_implementation=config.synapse_implementation,
             seed=config.seed,
             synapse=config.synapse,
             transformer=config.transformer,

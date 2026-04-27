@@ -27,6 +27,10 @@ training:
   gradient_clip_norm: 1.0
   use_amp: false
   num_workers: 0
+  sparsity_weight: 0.1
+  topology_reg_weight: 0.2
+  aux_ramp_start: 0
+  aux_ramp_end: 3
 
 data:
   proprio_dim: 2

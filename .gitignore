@@ -62,13 +62,14 @@ $RECYCLE.BIN/
 *.temp
 *.bak
 *.swp
+output
 applied
 docs
 outputs
 experiments/outputs
 TASKS.md
 legacy
-# logs.md
+logs.md
 applied_robotics
 working
 baselines/data

@@ -35,19 +35,27 @@ def sparsity_loss(y_star: torch.Tensor) -> torch.Tensor:
     return per_seq_l1.mean()
 
 
-def topology_reg_loss(topology_token: torch.Tensor, target_std: float = 1.0) -> torch.Tensor:
+def topology_reg_loss(
+    topology_token: torch.Tensor,
+    target_std: float = 0.25,
+    covariance_weight: float = 0.05,
+) -> torch.Tensor:
     """Prevent topology branch from collapsing to a constant.
 
-    Uses a Hinge loss on the standard deviation (similar to VICReg) to
-    maintain a healthy feature variance across the batch. This avoids the
-    violent gradient explosions (1e6+) caused by -log(x) when var -> 0.
+    Uses a VICReg-style variance floor plus a lightweight covariance penalty.
+    The previous target_std=1.0 was unrealistically large for this branch's
+    initialization scale, so the loss stayed pinned near 1.0 and conveyed
+    little information in logs.
 
     Parameters
     ----------
     topology_token : torch.Tensor
         Shape (B, d_model). Topology features for each sequence in batch.
     target_std : float
-        The target standard deviation to maintain across the batch dimension.
+        Target standard deviation across the batch dimension.
+    covariance_weight : float
+        Weight on off-diagonal covariance energy to discourage collapsed,
+        redundant topology channels.
 
     Returns
     -------
@@ -57,11 +65,13 @@ def topology_reg_loss(topology_token: torch.Tensor, target_std: float = 1.0) -> 
     if topology_token.shape[0] < 2:
         return torch.tensor(0.0, device=topology_token.device, dtype=topology_token.dtype)
 
-    # Variance across batch dimension, then std dev
-    # Add eps inside sqrt for numerical stability
-    var = topology_token.var(dim=0)
+    centered = topology_token - topology_token.mean(dim=0, keepdim=True)
+    var = centered.var(dim=0, unbiased=False)
     std = torch.sqrt(var + 1e-4)
-    
-    # Hinge loss: pushes std up to target_std, then stops
-    # Gradient is bounded to exactly -1.0 (or 0), eliminating explosion
-    return torch.mean(torch.relu(target_std - std))
+    variance_term = torch.mean(torch.relu(target_std - std))
+
+    feature_dim = topology_token.shape[1]
+    cov = centered.T @ centered / max(topology_token.shape[0], 1)
+    off_diag = cov - torch.diag(torch.diag(cov))
+    covariance_term = off_diag.square().sum() / max(feature_dim * (feature_dim - 1), 1)
+    return variance_term + covariance_weight * covariance_term

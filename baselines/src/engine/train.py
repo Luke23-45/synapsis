@@ -283,11 +283,15 @@ class Trainer:
         t_loss = topology_reg_loss(pred_outputs.topology_token)
         weighted_s_loss = s_loss * alpha_sparsity
         weighted_t_loss = t_loss * alpha_topo
+        topo_std_mean = torch.sqrt(
+            pred_outputs.topology_token.var(dim=0, unbiased=False) + 1e-4
+        ).mean()
 
         loss_dict = {
             "action_mse": action_mse,
             "sparsity_loss": s_loss,
             "topo_loss": t_loss,
+            "topo_std_mean": topo_std_mean,
             "weighted_sparsity_loss": weighted_s_loss,
             "weighted_topo_loss": weighted_t_loss,
             "alpha_sparsity": torch.tensor(alpha_sparsity, device=action_mse.device),
@@ -309,6 +313,7 @@ class Trainer:
         total_action_mse = 0.0
         total_sparsity_loss = 0.0
         total_topo_loss = 0.0
+        total_topo_std = 0.0
         total_weighted_sparsity_loss = 0.0
         total_weighted_topo_loss = 0.0
         total_phase_correct = 0
@@ -348,6 +353,7 @@ class Trainer:
                     topo_val = loss_dict["topo_loss"]
                     weighted_sparsity_val = loss_dict["weighted_sparsity_loss"]
                     weighted_topo_val = loss_dict["weighted_topo_loss"]
+                    topo_std_val = loss_dict["topo_std_mean"]
                     alpha_sparsity = float(loss_dict["alpha_sparsity"].item())
                     alpha_topo = float(loss_dict["alpha_topo"].item())
                 else:
@@ -358,6 +364,7 @@ class Trainer:
                     topo_val = torch.tensor(0.0, device=self.device)
                     weighted_sparsity_val = torch.tensor(0.0, device=self.device)
                     weighted_topo_val = torch.tensor(0.0, device=self.device)
+                    topo_std_val = torch.tensor(0.0, device=self.device)
                     alpha_sparsity = 0.0
                     alpha_topo = 0.0
 
@@ -384,6 +391,7 @@ class Trainer:
             total_action_mse += action_loss.item()
             total_sparsity_loss += sparsity_val.item()
             total_topo_loss += topo_val.item()
+            total_topo_std += topo_std_val.item()
             total_weighted_sparsity_loss += weighted_sparsity_val.item()
             total_weighted_topo_loss += weighted_topo_val.item()
             n_batches += 1
@@ -399,6 +407,7 @@ class Trainer:
                 if self.uses_auxiliary_synapse_losses:
                     postfix["sparse"] = f"{sparsity_val.item():.4f}"
                     postfix["topo"] = f"{topo_val.item():.4f}"
+                    postfix["t_std"] = f"{topo_std_val.item():.3f}"
                     postfix["a_s"] = f"{alpha_sparsity:.3f}"
                     postfix["a_t"] = f"{alpha_topo:.3f}"
                 postfix["grad"] = f"{grad_norm:.2f}"
@@ -411,6 +420,7 @@ class Trainer:
         avg_mse = total_action_mse / max(1, n_batches)
         avg_sparsity = total_sparsity_loss / max(1, n_batches)
         avg_topo = total_topo_loss / max(1, n_batches)
+        avg_topo_std = total_topo_std / max(1, n_batches)
         avg_weighted_sparsity = total_weighted_sparsity_loss / max(1, n_batches)
         avg_weighted_topo = total_weighted_topo_loss / max(1, n_batches)
         current_lr = self.optimizer.param_groups[0]["lr"]
@@ -424,6 +434,7 @@ class Trainer:
             "action_mse": avg_mse,
             "sparsity_loss": avg_sparsity,
             "topo_loss": avg_topo,
+            "topo_std_mean": avg_topo_std,
             "weighted_sparsity_loss": avg_weighted_sparsity,
             "weighted_topo_loss": avg_weighted_topo,
             "alpha_sparsity": _aux_weight_schedule(
@@ -519,6 +530,7 @@ class Trainer:
                 log_msg += (
                     f" | train_sparse={train_metrics['sparsity_loss']:.6f} "
                     f"| train_topo={train_metrics['topo_loss']:.6f}"
+                    f" | topo_std={train_metrics['topo_std_mean']:.6f}"
                     f" | alpha_sparse={train_metrics['alpha_sparsity']:.6f}"
                     f" | alpha_topo={train_metrics['alpha_topo']:.6f}"
                     f" | sparse_contrib={train_metrics['weighted_sparsity_loss']:.6f}"
