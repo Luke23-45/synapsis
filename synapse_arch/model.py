@@ -117,14 +117,36 @@ class SynapseEndToEndModel(nn.Module):
             y_star = self.relaxed_selector(saliency_scores)
         soft_vectors = self._soft_anchor_vectors(structured_history, saliency_scores)
         _, dense_lifted = self.normalized_lift(soft_vectors)
-        topo_features = self.topology_branch.surrogate(dense_lifted, y_star)
-        anchor_tokens, topo_token = self.memory_readout.forward_train(dense_lifted, topo_features, y_star)
+        topo_features_surrogate = self.topology_branch.surrogate(dense_lifted, y_star)
+        
+        exact_topo_features = []
+        dl_np = dense_lifted.detach().cpu().numpy()
+        y_np = y_star.detach().cpu().numpy()
+        for i in range(dl_np.shape[0]):
+            mask = y_np[i] > 1e-3
+            if not mask.any():
+                cloud = dl_np[i, :1]
+            else:
+                cloud = dl_np[i, mask]
+            if cloud.shape[0] > self.config.K:
+                top_k_indices = np.argsort(y_np[i, mask])[::-1][:self.config.K]
+                cloud = cloud[top_k_indices]
+            _, topo_summary = self.topology_branch.exact(cloud, self.config.Q)
+            exact_topo_features.append(torch.from_numpy(topo_summary).to(device=dense_lifted.device, dtype=dense_lifted.dtype))
+            
+        exact_topo_tensor = torch.stack(exact_topo_features, dim=0)
+        topo_proj_exact = self.topology_branch.proj(exact_topo_tensor)
+        
+        anchor_tokens, topo_token_exact = self.memory_readout.forward_train(dense_lifted, topo_proj_exact, y_star)
+        
         if not use_anchors:
             anchor_tokens = torch.zeros_like(anchor_tokens)
         if not use_topology:
-            topo_token = torch.zeros_like(topo_token)
+            topo_token_exact = torch.zeros_like(topo_token_exact)
+            topo_features_surrogate = torch.zeros_like(topo_features_surrogate)
+            
         current_token = self.current_proj(structured_state).unsqueeze(1)
-        transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token], dim=1)
+        transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token_exact], dim=1)
         key_padding_mask = self._build_padding_mask(y_star)
         encoded = self.task_transformer(transformer_tokens, key_padding_mask=key_padding_mask)
         pred_actions = self.action_head(encoded[:, 0, :])
@@ -134,7 +156,7 @@ class SynapseEndToEndModel(nn.Module):
             saliency_scores=saliency_scores,
             y_star=y_star,
             dense_lifted_tokens=dense_lifted,
-            topology_token=topo_token.squeeze(1),
+            topology_token=topo_features_surrogate,
             transformer_tokens=transformer_tokens,
         )
 

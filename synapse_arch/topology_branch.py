@@ -41,6 +41,11 @@ class TopologyBranch(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
+        self.surrogate_proj = nn.Sequential(
+            nn.Linear(12, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
         self.lift_dim = lift_dim
 
     def _surrogate_summary(
@@ -104,19 +109,11 @@ class TopologyBranch(nn.Module):
             ],
             dim=-1,
         )
-        if self.summary_dim <= features.shape[1]:
-            return features[:, : self.summary_dim]
-        pad = torch.zeros(
-            features.shape[0],
-            self.summary_dim - features.shape[1],
-            device=features.device,
-            dtype=features.dtype,
-        )
-        return torch.cat([features, pad], dim=-1)
+        return features
 
     def surrogate(self, lifted_tokens: torch.Tensor, activations: torch.Tensor) -> torch.Tensor:
         summary = self._surrogate_summary(lifted_tokens, activations)
-        return self.proj(summary)
+        return self.surrogate_proj(summary)
 
     def exact(self, point_cloud: np.ndarray, Q: int, max_edge_length: float | None = None) -> tuple[List[Any], np.ndarray]:
         diagrams = compute_persistence_diagrams(point_cloud, Q, max_edge_length=max_edge_length)
