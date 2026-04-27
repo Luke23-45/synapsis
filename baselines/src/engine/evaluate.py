@@ -236,6 +236,7 @@ class Evaluator:
                     self.config,
                     n_steps=self.config.stats.rollout_steps,
                     max_episodes=max_rollout_episodes,
+                    dump_topology_dir=self.output_dir / "topology_dumps",
                 )
                 rollout_results = aggregate_rollout_results(rollout_dict)
             except Exception as e:

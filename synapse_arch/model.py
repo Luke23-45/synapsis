@@ -120,8 +120,8 @@ class SynapseEndToEndModel(nn.Module):
         topo_features_surrogate = self.topology_branch.surrogate(dense_lifted, y_star)
         
         exact_topo_features = []
-        dl_np = dense_lifted.detach().cpu().numpy()
-        y_np = y_star.detach().cpu().numpy()
+        dl_np = dense_lifted.detach().float().cpu().numpy()
+        y_np = y_star.detach().float().cpu().numpy()
         for i in range(dl_np.shape[0]):
             mask = y_np[i] > 1e-3
             if not mask.any():

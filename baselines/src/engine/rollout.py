@@ -62,12 +62,59 @@ class RolloutResult:
     open_loop_mse: float
 
 
+def plot_persistence_diagram(diagrams, output_path: Path):
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(6, 6))
+    colors = ['blue', 'red', 'green', 'orange']
+    for q, dgm in enumerate(diagrams):
+        if len(dgm) == 0: continue
+        dgm = np.array(dgm)
+        births = dgm[:, 0]
+        deaths = dgm[:, 1]
+        finite_deaths = deaths[np.isfinite(deaths)]
+        max_death = np.max(finite_deaths) if len(finite_deaths) > 0 else np.max(births) + 1.0
+        inf_replacement = max_death * 1.1
+        plot_deaths = np.where(np.isfinite(deaths), deaths, inf_replacement)
+        plt.scatter(births, plot_deaths, color=colors[q % len(colors)], label=f'H{q}', alpha=0.7)
+    ax = plt.gca()
+    lims = [np.min([ax.get_xlim(), ax.get_ylim()]), np.max([ax.get_xlim(), ax.get_ylim()])]
+    plt.plot(lims, lims, 'k-', alpha=0.3, zorder=0)
+    plt.xlim(lims)
+    plt.ylim(lims)
+    plt.xlabel("Birth")
+    plt.ylabel("Death")
+    plt.title("Persistence Diagram")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.savefig(output_path)
+    plt.close()
+
+def plot_point_cloud_3d(point_cloud: np.ndarray, anchor_times: np.ndarray, output_path: Path):
+    import matplotlib.pyplot as plt
+    from sklearn.decomposition import PCA
+    if point_cloud.shape[0] < 3: return
+    pca = PCA(n_components=min(3, point_cloud.shape[1]))
+    points_3d = pca.fit_transform(point_cloud)
+    fig = plt.figure(figsize=(8, 6))
+    if points_3d.shape[1] == 3:
+        ax = fig.add_subplot(111, projection='3d')
+        scatter = ax.scatter(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2], c=anchor_times, cmap='viridis', s=50)
+        ax.plot(points_3d[:, 0], points_3d[:, 1], points_3d[:, 2], 'gray', alpha=0.5)
+    else:
+        ax = fig.add_subplot(111)
+        scatter = ax.scatter(points_3d[:, 0], points_3d[:, 1], c=anchor_times, cmap='viridis', s=50)
+        ax.plot(points_3d[:, 0], points_3d[:, 1], 'gray', alpha=0.5)
+    fig.colorbar(scatter, label="Normalized Time")
+    plt.savefig(output_path)
+    plt.close()
+
 def rollout_evaluate(
     model: RoboticsPlannerBase,
     initial_batch: Dict[str, torch.Tensor],
     ground_truth_actions: torch.Tensor,
     n_steps: int = 10,
     action_to_proprio_projection: Optional[torch.nn.Linear] = None,
+    dump_topology_dir: Optional[Path] = None,
 ) -> RolloutResult:
     """Autoregressive rollout: feed predictions back as input.
 
@@ -90,6 +137,8 @@ def rollout_evaluate(
     action_to_proprio_projection : nn.Linear, optional
         Projection from action space to proprio space for history update.
         If None, a simple truncation/padding is used.
+    dump_topology_dir : Path, optional
+        If provided, dumps topology geometry for each step to this directory.
 
     Returns
     -------
@@ -195,7 +244,27 @@ def rollout_evaluate(
 
             # Predict action
             if uses_synapse:
-                pred_action = model.forward_deploy(batch).pred_actions
+                deploy_out = model.forward_deploy(batch)
+                pred_action = deploy_out.pred_actions
+                
+                if dump_topology_dir is not None and len(deploy_out.exact_memory_states) > 0:
+                    try:
+                        step_dir = Path(dump_topology_dir) / f"step_{step:02d}"
+                        step_dir.mkdir(parents=True, exist_ok=True)
+                        memory_state = deploy_out.exact_memory_states[0]
+                        np.savez(
+                            step_dir / "topology_data.npz",
+                            point_cloud=memory_state.point_cloud,
+                            anchor_indices=np.array(memory_state.anchor_indices),
+                            y_star=memory_state.y_star,
+                            topology_summary=memory_state.topology_summary,
+                        )
+                        plot_persistence_diagram(memory_state.persistence_diagrams, step_dir / "persistence_diagram.png")
+                        seq_len = int(history_lengths[0].item())
+                        anchor_times = np.array(memory_state.anchor_indices) / max(seq_len, 1)
+                        plot_point_cloud_3d(memory_state.point_cloud, anchor_times, step_dir / "point_cloud_pca.png")
+                    except Exception as e:
+                        log.warning(f"Failed to dump topology: {e}")
             else:
                 pred_action = model(batch)
 
@@ -262,6 +331,7 @@ def rollout_evaluate_dataset(
     config: ExperimentConfig,
     n_steps: int = 10,
     max_episodes: int = 50,
+    dump_topology_dir: Optional[Path] = None,
 ) -> Dict[str, RolloutResult]:
     """Run rollout evaluation across a dataset, aggregating per-episode results.
 
@@ -273,6 +343,8 @@ def rollout_evaluate_dataset(
     n_steps : int
     max_episodes : int
         Maximum episodes to evaluate (for compute budget).
+    dump_topology_dir : Path, optional
+        If provided, dumps topology geometry for the *first* episode to this directory.
 
     Returns
     -------
@@ -321,12 +393,18 @@ def rollout_evaluate_dataset(
                     k: v[b:b+1] if isinstance(v, torch.Tensor) else v
                     for k, v in batch_device.items()
                 }
+                
+                # Only dump topology for the very first episode to save space/time
+                current_dump_dir = None
+                if dump_topology_dir is not None and len(results) == 0:
+                    current_dump_dir = dump_topology_dir / ep_id
 
                 result = rollout_evaluate(
                     model,
                     single_batch,
                     gt_actions[b:b+1],
                     n_steps=n_steps,
+                    dump_topology_dir=current_dump_dir,
                 )
 
                 results[ep_id] = result
