@@ -184,5 +184,5 @@ class TopologyBranch(nn.Module):
 
         features.append(torch.stack([mean_dist, max_dist, dist_var, compactness], dim=-1))
 
-        raw_features = torch.cat(features, dim=-1).to(point_cloud.dtype)
-        return self.spectral_proj(raw_features)
+        raw_features = torch.cat(features, dim=-1)  # stays float32
+        return self.spectral_proj(raw_features).to(point_cloud.dtype)
