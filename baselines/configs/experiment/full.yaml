@@ -11,6 +11,7 @@ seed: 42
 experiment_name: phase4_cross_domain
 
 synapse:
+  bypass_anchor_selection: true
   K: 40
   r: 3
   tau: 0.5

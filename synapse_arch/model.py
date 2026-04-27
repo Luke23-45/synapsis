@@ -39,6 +39,7 @@ class SynapseArchitectureConfig:
     Q: int
     k: int
     max_history_tokens: int
+    bypass_anchor_selection: bool = False
 
 
 class SynapseEndToEndModel(nn.Module):
@@ -105,9 +106,15 @@ class SynapseEndToEndModel(nn.Module):
         structured_state = batch["structured_state"]
         _, event_scores = self.event_encoder(structured_history)
         history_mask = batch.get("history_mask")
-        saliency_scores = self.saliency_normalizer(event_scores, history_mask)
-        saliency_scores = self._mask_saliency(saliency_scores, batch)
-        y_star = self.relaxed_selector(saliency_scores)
+        if self.config.bypass_anchor_selection:
+            saliency_scores = torch.ones_like(event_scores)
+            y_star = torch.ones_like(event_scores)
+            if history_mask is not None:
+                y_star = y_star * history_mask.to(dtype=y_star.dtype)
+        else:
+            saliency_scores = self.saliency_normalizer(event_scores, history_mask)
+            saliency_scores = self._mask_saliency(saliency_scores, batch)
+            y_star = self.relaxed_selector(saliency_scores)
         soft_vectors = self._soft_anchor_vectors(structured_history, saliency_scores)
         _, dense_lifted = self.normalized_lift(soft_vectors)
         topo_features = self.topology_branch.surrogate(dense_lifted, y_star)
@@ -135,13 +142,19 @@ class SynapseEndToEndModel(nn.Module):
         device = next(self.parameters()).device
         dtype = next(self.parameters()).dtype
         sequence_t = torch.from_numpy(sequence).to(device=device, dtype=dtype).unsqueeze(0)
-        _, event_scores_t = self.event_encoder(sequence_t)
-        saliency_scores_t = self.saliency_normalizer(event_scores_t)
-        y_star_t = self.relaxed_selector(saliency_scores_t)
-        event_scores = event_scores_t.squeeze(0).detach().cpu().numpy().astype(np.float64)
-        saliency_scores = saliency_scores_t.squeeze(0).detach().cpu().numpy().astype(np.float64)
-        y_star = y_star_t.squeeze(0).detach().cpu().numpy().astype(np.float64)
-        indices = self.hard_projector.project(y_star)
+        if self.config.bypass_anchor_selection:
+            y_star = np.ones(sequence.shape[0], dtype=np.float64)
+            saliency_scores = np.ones(sequence.shape[0], dtype=np.float64)
+            event_scores = np.zeros(sequence.shape[0], dtype=np.float64)
+            indices = list(range(sequence.shape[0]))
+        else:
+            _, event_scores_t = self.event_encoder(sequence_t)
+            saliency_scores_t = self.saliency_normalizer(event_scores_t)
+            y_star_t = self.relaxed_selector(saliency_scores_t)
+            event_scores = event_scores_t.squeeze(0).detach().cpu().numpy().astype(np.float64)
+            saliency_scores = saliency_scores_t.squeeze(0).detach().cpu().numpy().astype(np.float64)
+            y_star = y_star_t.squeeze(0).detach().cpu().numpy().astype(np.float64)
+            indices = self.hard_projector.project(y_star)
         anchors = self.anchor_builder.build(indices, sequence.astype(np.float64), event_scores)
         V = anchor_vectors(anchors, D=sequence.shape[1] + 3)
         mu = self.normalized_lift.mu.detach().cpu().numpy().astype(np.float64)
@@ -188,25 +201,37 @@ class SynapseEndToEndModel(nn.Module):
             exact_state = self._deploy_single(trimmed_sequence)
             exact_states.append(exact_state)
             cloud = exact_state.point_cloud.astype(np.float32)
-            num_valid = min(cloud.shape[0], self.config.K)
+            if self.config.bypass_anchor_selection:
+                num_valid = len(exact_state.y_star)
+                deploy_act_size = self.config.max_history_tokens
+            else:
+                num_valid = min(cloud.shape[0], self.config.K)
+                deploy_act_size = self.config.K
             
-            deploy_act = np.zeros(self.config.K, dtype=np.float32)
+            deploy_act = np.zeros(deploy_act_size, dtype=np.float32)
             deploy_act[:num_valid] = 1.0
             deploy_activations_list.append(torch.from_numpy(deploy_act).to(structured_history.device))
             
             pos = [0]
-            for idx in exact_state.anchor_indices[:self.config.K]:
+            for idx in exact_state.anchor_indices[:num_valid]:
                 pos.append(int(idx) + 1)
-            for _ in range(self.config.K - len(exact_state.anchor_indices[:self.config.K])):
+            for _ in range(deploy_act_size - len(exact_state.anchor_indices[:num_valid])):
                 pos.append(0)
             pos.append(actual_length + 1)
             pos_indices_list.append(pos)
             
-            if cloud.shape[0] < self.config.K:
-                pad = np.zeros((self.config.K - cloud.shape[0], self.config.k), dtype=np.float32)
-                cloud = np.concatenate([cloud, pad], axis=0)
+            if self.config.bypass_anchor_selection:
+                if cloud.shape[0] < self.config.max_history_tokens:
+                    pad = np.zeros((self.config.max_history_tokens - cloud.shape[0], self.config.k), dtype=np.float32)
+                    cloud = np.concatenate([cloud, pad], axis=0)
+                else:
+                    cloud = cloud[: self.config.max_history_tokens]
             else:
-                cloud = cloud[: self.config.K]
+                if cloud.shape[0] < self.config.K:
+                    pad = np.zeros((self.config.K - cloud.shape[0], self.config.k), dtype=np.float32)
+                    cloud = np.concatenate([cloud, pad], axis=0)
+                else:
+                    cloud = cloud[: self.config.K]
             
             anchor_clouds.append(torch.from_numpy(cloud).to(structured_history.device, dtype=structured_history.dtype))
             topo_features.append(torch.from_numpy(exact_state.topology_summary).to(structured_history.device, dtype=structured_history.dtype))
