@@ -315,7 +315,7 @@ class TestEndToEndPlanner:
         lifted = torch.randn(2, 6, 8)
         activations = torch.rand(2, 6)
         summary = branch._surrogate_summary(lifted, activations)
-        assert summary.shape == (2, 8)
+        assert summary.shape == (2, 12)  # 12 spatial statistics from _surrogate_summary
         assert not torch.allclose(summary[:, :4], summary[:, 4:8])
 
 

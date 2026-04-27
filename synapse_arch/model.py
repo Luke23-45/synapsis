@@ -73,7 +73,7 @@ class SynapseEndToEndModel(nn.Module):
             num_layers=config.num_layers,
             dropout=config.dropout,
             ffn_ratio=config.ffn_ratio,
-            max_tokens=config.max_history_tokens + 2,
+            max_tokens=config.max_history_tokens + 3,  # +3: current + anchors + exact_topo + surrogate_topo
         )
         self.action_head = ActionHead(config.d_model, config.action_chunk_size, config.action_dim)
 
@@ -90,10 +90,12 @@ class SynapseEndToEndModel(nn.Module):
         return torch.cat([t.unsqueeze(-1), structured_history, delta.unsqueeze(-1), saliency_scores.unsqueeze(-1)], dim=-1)
 
     def _build_padding_mask(self, activations: torch.Tensor) -> torch.Tensor:
-        current_mask = torch.zeros(activations.shape[0], 1, dtype=torch.bool, device=activations.device)
+        B, device = activations.shape[0], activations.device
+        current_mask = torch.zeros(B, 1, dtype=torch.bool, device=device)
         anchor_mask = activations <= 0
-        topo_mask = torch.zeros(activations.shape[0], 1, dtype=torch.bool, device=activations.device)
-        return torch.cat([current_mask, anchor_mask, topo_mask], dim=1)
+        topo_mask = torch.zeros(B, 1, dtype=torch.bool, device=device)
+        surrogate_mask = torch.zeros(B, 1, dtype=torch.bool, device=device)  # Proposal A: surrogate token
+        return torch.cat([current_mask, anchor_mask, topo_mask, surrogate_mask], dim=1)
 
     def _mask_saliency(self, saliency_scores: torch.Tensor, batch: dict) -> torch.Tensor:
         history_mask = batch.get("history_mask")
@@ -116,11 +118,21 @@ class SynapseEndToEndModel(nn.Module):
             saliency_scores = self._mask_saliency(saliency_scores, batch)
             y_star = self.relaxed_selector(saliency_scores)
         soft_vectors = self._soft_anchor_vectors(structured_history, saliency_scores)
-        _, dense_lifted = self.normalized_lift(soft_vectors)
-        topo_features_surrogate = self.topology_branch.surrogate(dense_lifted, y_star)
-        
+        _, dense_lifted = self.normalized_lift(soft_vectors)  # Full lift (with time) for anchor tokens
+
+        # Proposal B: Time-invariant lift for TDA — zeroing the time column
+        # prevents monotonic time from stretching the manifold into a non-intersecting helix
+        soft_vectors_spatial = soft_vectors.clone()
+        soft_vectors_spatial[:, :, 0] = 0.0
+        _, dense_lifted_spatial = self.normalized_lift(soft_vectors_spatial)
+
+        # Proposal A: Surrogate computed from spatial lift — this is differentiable
+        # and will carry gradients from the action loss back to W_Theta
+        topo_features_surrogate = self.topology_branch.surrogate(dense_lifted_spatial, y_star)
+
+        # Exact TDA uses the spatial (time-invariant) lift
         exact_topo_features = []
-        dl_np = dense_lifted.detach().float().cpu().numpy()
+        dl_np = dense_lifted_spatial.detach().float().cpu().numpy()
         y_np = y_star.detach().float().cpu().numpy()
         for i in range(dl_np.shape[0]):
             mask = y_np[i] > 1e-3
@@ -133,20 +145,25 @@ class SynapseEndToEndModel(nn.Module):
                 cloud = cloud[top_k_indices]
             _, topo_summary = self.topology_branch.exact(cloud, self.config.Q)
             exact_topo_features.append(torch.from_numpy(topo_summary).to(device=dense_lifted.device, dtype=dense_lifted.dtype))
-            
+
         exact_topo_tensor = torch.stack(exact_topo_features, dim=0)
         topo_proj_exact = self.topology_branch.proj(exact_topo_tensor)
-        
+
+        # Anchor tokens use the FULL lift (with time) for temporal ordering
         anchor_tokens, topo_token_exact = self.memory_readout.forward_train(dense_lifted, topo_proj_exact, y_star)
-        
+
+        # Proposal A: Surrogate token — differentiable path into the Transformer
+        surrogate_token = topo_features_surrogate.unsqueeze(1)  # (B, 1, d_model)
+
         if not use_anchors:
             anchor_tokens = torch.zeros_like(anchor_tokens)
         if not use_topology:
             topo_token_exact = torch.zeros_like(topo_token_exact)
             topo_features_surrogate = torch.zeros_like(topo_features_surrogate)
-            
+            surrogate_token = torch.zeros_like(surrogate_token)
+
         current_token = self.current_proj(structured_state).unsqueeze(1)
-        transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token_exact], dim=1)
+        transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token_exact, surrogate_token], dim=1)
         key_padding_mask = self._build_padding_mask(y_star)
         encoded = self.task_transformer(transformer_tokens, key_padding_mask=key_padding_mask)
         pred_actions = self.action_head(encoded[:, 0, :])
@@ -179,6 +196,8 @@ class SynapseEndToEndModel(nn.Module):
             indices = self.hard_projector.project(y_star)
         anchors = self.anchor_builder.build(indices, sequence.astype(np.float64), event_scores)
         V = anchor_vectors(anchors, D=sequence.shape[1] + 3)
+        # Proposal B: Zero out time column for time-invariant TDA
+        V[:, 0] = 0.0
         mu = self.normalized_lift.mu.detach().cpu().numpy().astype(np.float64)
         sigma = self.normalized_lift.sigma.detach().cpu().numpy().astype(np.float64)
         V_norm, _, _ = normalize_anchors(V, mu=mu, sigma=sigma)
@@ -204,6 +223,26 @@ class SynapseEndToEndModel(nn.Module):
         if history_lengths is None:
             history_lengths = batch.get("history_length")
         history_mask = batch.get("history_mask")
+
+        # Proposal A: Compute differentiable surrogate for all samples
+        _, event_scores_d = self.event_encoder(structured_history)
+        if self.config.bypass_anchor_selection:
+            saliency_d = torch.ones_like(event_scores_d)
+            y_star_d = torch.ones_like(event_scores_d)
+            if history_mask is not None:
+                y_star_d = y_star_d * history_mask.to(dtype=y_star_d.dtype)
+        else:
+            saliency_d = self.saliency_normalizer(event_scores_d, history_mask)
+            saliency_d = self._mask_saliency(saliency_d, batch)
+            y_star_d = self.relaxed_selector(saliency_d)
+        soft_vectors = self._soft_anchor_vectors(structured_history, saliency_d)
+        # Proposal B: Time-invariant spatial lift for surrogate
+        soft_vectors_spatial = soft_vectors.clone()
+        soft_vectors_spatial[:, :, 0] = 0.0
+        _, dense_lifted_spatial = self.normalized_lift(soft_vectors_spatial)
+        surrogate_features = self.topology_branch.surrogate(dense_lifted_spatial, y_star_d)
+        surrogate_token = surrogate_features.unsqueeze(1)  # (B, 1, d_model)
+
         exact_states = []
         anchor_clouds = []
         topo_features = []
@@ -239,7 +278,8 @@ class SynapseEndToEndModel(nn.Module):
                 pos.append(int(idx) + 1)
             for _ in range(deploy_act_size - len(exact_state.anchor_indices[:num_valid])):
                 pos.append(0)
-            pos.append(actual_length + 1)
+            pos.append(actual_length + 1)  # exact topo position
+            pos.append(actual_length + 2)  # surrogate topo position
             pos_indices_list.append(pos)
             
             if self.config.bypass_anchor_selection:
@@ -272,9 +312,10 @@ class SynapseEndToEndModel(nn.Module):
             anchor_tokens = torch.zeros_like(anchor_tokens)
         if not use_topology:
             topo_token = torch.zeros_like(topo_token)
-            
+            surrogate_token = torch.zeros_like(surrogate_token)
+
         current_token = self.current_proj(structured_state).unsqueeze(1)
-        transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token], dim=1)
+        transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token, surrogate_token], dim=1)
         
         key_padding_mask = self._build_padding_mask(deploy_activations)
         encoded = self.task_transformer(transformer_tokens, key_padding_mask=key_padding_mask, pos_indices=pos_indices_tensor)
