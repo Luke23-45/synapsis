@@ -18,7 +18,7 @@ from .normalized_lift import NormalizedLift
 from .relaxed_selector_layer import RelaxedSelectorLayer
 from .saliency_normalizer import SaliencyNormalizer
 from .task_transformer import TaskTransformer
-from .topology_branch import TopologyBranch
+from .hodge_branch import HodgeTopologyBranch
 from .types import DeployForwardOutput, ExactMemoryState, TrainForwardOutput
 
 
@@ -65,7 +65,7 @@ class SynapseEndToEndModel(nn.Module):
         self.anchor_builder = AnchorBuilder()
         self.normalized_lift = NormalizedLift(anchor_dim, config.k)
         topo_summary_dim = 4 * (config.Q + 1)
-        self.topology_branch = TopologyBranch(config.k, summary_dim=topo_summary_dim, hidden_dim=config.d_model)
+        self.topology_branch = HodgeTopologyBranch(config.k, summary_dim=topo_summary_dim, hidden_dim=config.d_model)
         self.memory_readout = MemoryReadout(config.k, config.d_model, topology_dim=config.d_model)
         self.task_transformer = TaskTransformer(
             d_model=config.d_model,
@@ -121,9 +121,12 @@ class SynapseEndToEndModel(nn.Module):
 
         # Proposal B: Time-invariant lift for topology — zeroing the time column
         # prevents monotonic time from stretching the manifold into a non-intersecting helix
+        # PERF: Instead of running normalized_lift twice, zero the time column on the
+        # normalized vectors and re-apply the same W_theta matmul.
         soft_vectors_spatial = soft_vectors.clone()
         soft_vectors_spatial[:, :, 0] = 0.0
-        _, dense_lifted_spatial = self.normalized_lift(soft_vectors_spatial)
+        normed_spatial = self.normalized_lift.normalize(soft_vectors_spatial)
+        dense_lifted_spatial = torch.matmul(normed_spatial, self.normalized_lift.W_theta.t())
 
         # Surrogate (kept for auxiliary topology_reg_loss only)
         topo_features_surrogate = self.topology_branch.surrogate(dense_lifted_spatial, y_star)

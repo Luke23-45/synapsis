@@ -21,7 +21,7 @@ import torch
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
-from synapse_arch.topology_branch import TopologyBranch
+from synapse_arch.hodge_branch import HodgeTopologyBranch
 
 from src.core.config import (
     ExperimentConfig, Condition, SynapseImplementation, SynapseParams, TransformerParams,
@@ -311,7 +311,7 @@ class TestEndToEndPlanner:
         assert output.topology_token.shape[0] == 2
 
     def test_topology_surrogate_summary_uses_distinct_features(self):
-        branch = TopologyBranch(lift_dim=8, summary_dim=8, hidden_dim=16)
+        branch = HodgeTopologyBranch(lift_dim=8, summary_dim=8, hidden_dim=16)
         lifted = torch.randn(2, 6, 8)
         activations = torch.rand(2, 6)
         summary = branch._surrogate_summary(lifted, activations)

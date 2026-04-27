@@ -11,7 +11,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from synapse_arch.model import SynapseArchitectureConfig, SynapseEndToEndModel
 from synapse_arch.saliency_normalizer import SaliencyNormalizer
-from synapse_arch.topology_branch import TopologyBranch
+from synapse_arch.hodge_branch import HodgeTopologyBranch
 from synapse_core.anchor_selector import hard_projection as core_hard_projection
 
 
@@ -94,7 +94,7 @@ def test_saliency_normalizer_outputs_nonnegative_saliency_after_first_step():
 
 
 def test_topology_surrogate_respects_zero_activations():
-    branch = TopologyBranch(lift_dim=4, summary_dim=8, hidden_dim=6)
+    branch = HodgeTopologyBranch(lift_dim=8, summary_dim=8, hidden_dim=16)
     lifted = torch.randn(2, 5, 4)
     activations = torch.zeros(2, 5)
 

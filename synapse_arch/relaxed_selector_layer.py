@@ -25,12 +25,13 @@ class _RelaxedSelectorFunction(torch.autograd.Function):
             
         # [SOTA FIX] For training batches (B > 1), use a fully-batched GPU Projected Gradient Descent (PGD).
         # This completely bypasses scipy/OSQP limitations and solves all 256 QPs in ~2 milliseconds!
+        # PERF: 30 iterations is empirically sufficient for K=10, r=2.
+        # Removed torch.allclose convergence check — it forces a GPU sync every iteration.
         x = saliency_scores / (2.0 * lam)
         y = x.clone().clamp(0, 1)
         lr = 0.5
         
-        for _ in range(100):
-            y_prev = y.clone()
+        for _ in range(30):
             # Gradient step towards the unconstrained optimum
             y = y - lr * (y - x)
             
@@ -50,10 +51,6 @@ class _RelaxedSelectorFunction(torch.autograd.Function):
             
             y = y.clamp(0, 1)
             y[:, 0] = 0.0  # y_1 = 0 constraint
-            
-            # 3. Early convergence check to avoid wasting GPU cycles
-            if torch.allclose(y, y_prev, atol=1e-4):
-                break
 
         ctx.save_for_backward(y.clone())
         return y
