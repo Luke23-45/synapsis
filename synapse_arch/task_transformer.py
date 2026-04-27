@@ -20,7 +20,7 @@ class TaskTransformer(nn.Module):
         )
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers, enable_nested_tensor=False)
 
-    def forward(self, tokens: torch.Tensor, key_padding_mask: torch.Tensor | None = None, pos_indices: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, key_padding_mask: torch.Tensor | None = None, pos_indices: torch.Tensor | None = None, attn_bias: torch.Tensor | None = None) -> torch.Tensor:
         steps = tokens.shape[1]
         
         if pos_indices is not None:
@@ -36,4 +36,6 @@ class TaskTransformer(nn.Module):
                 raise ValueError(f"Token sequence length {steps} exceeds max_tokens {self.max_tokens}")
             encoded = tokens + self.pos_embed[:, :steps, :]
             
-        return self.encoder(encoded, src_key_padding_mask=key_padding_mask)
+        # attn_bias: (B*num_heads, seq_len, seq_len) topological attention bias
+        # Added to attention logits before softmax — forces geometry-aware attention
+        return self.encoder(encoded, mask=attn_bias, src_key_padding_mask=key_padding_mask)

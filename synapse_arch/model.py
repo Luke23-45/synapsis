@@ -65,7 +65,7 @@ class SynapseEndToEndModel(nn.Module):
         self.anchor_builder = AnchorBuilder()
         self.normalized_lift = NormalizedLift(anchor_dim, config.k)
         topo_summary_dim = 4 * (config.Q + 1)
-        self.topology_branch = TopologyBranch(config.k, summary_dim=topo_summary_dim, hidden_dim=config.d_model)
+        self.topology_branch = TopologyBranch(config.k, summary_dim=topo_summary_dim, hidden_dim=config.d_model, num_heads=config.num_heads)
         self.memory_readout = MemoryReadout(config.k, config.d_model, topology_dim=config.d_model)
         self.task_transformer = TaskTransformer(
             d_model=config.d_model,
@@ -73,7 +73,7 @@ class SynapseEndToEndModel(nn.Module):
             num_layers=config.num_layers,
             dropout=config.dropout,
             ffn_ratio=config.ffn_ratio,
-            max_tokens=config.max_history_tokens + 2,  # +2: current + anchors + spectral_topo
+            max_tokens=config.max_history_tokens + 1,  # +1: current + anchors (topology is in attention, not tokens)
         )
         self.action_head = ActionHead(config.d_model, config.action_chunk_size, config.action_dim)
 
@@ -93,8 +93,7 @@ class SynapseEndToEndModel(nn.Module):
         B, device = activations.shape[0], activations.device
         current_mask = torch.zeros(B, 1, dtype=torch.bool, device=device)
         anchor_mask = activations <= 0
-        topo_mask = torch.zeros(B, 1, dtype=torch.bool, device=device)
-        return torch.cat([current_mask, anchor_mask, topo_mask], dim=1)
+        return torch.cat([current_mask, anchor_mask], dim=1)
 
     def _mask_saliency(self, saliency_scores: torch.Tensor, batch: dict) -> torch.Tensor:
         history_mask = batch.get("history_mask")
@@ -120,33 +119,34 @@ class SynapseEndToEndModel(nn.Module):
         _, dense_lifted = self.normalized_lift(soft_vectors)  # Full lift for anchor tokens
 
         # Proposal B: Time-invariant lift for topology — zeroing the time column
-        # prevents monotonic time from stretching the manifold into a non-intersecting helix
         soft_vectors_spatial = soft_vectors.clone()
         soft_vectors_spatial[:, :, 0] = 0.0
         _, dense_lifted_spatial = self.normalized_lift(soft_vectors_spatial)
 
-        # Surrogate (kept for auxiliary topology_reg_loss only)
+        # Surrogate (kept for auxiliary topology_reg_loss diagnostics)
         topo_features_surrogate = self.topology_branch.surrogate(dense_lifted_spatial, y_star)
-
-        # Differentiable spectral topology features (replaces detached Gudhi)
-        # Uses graph Laplacian eigenvalues — fully differentiable, action loss shapes geometry
-        with torch.autocast(device_type=dense_lifted.device.type, enabled=False):
-            spectral_topo = self.topology_branch.spectral_features(dense_lifted_spatial, y_star)
 
         # Anchor tokens use the FULL lift (with time) for temporal ordering
         anchor_tokens = self.memory_readout.anchor_proj(dense_lifted) * y_star.unsqueeze(-1)
-        topo_token = self.memory_readout.topology_proj(spectral_topo).unsqueeze(1)
 
         if not use_anchors:
             anchor_tokens = torch.zeros_like(anchor_tokens)
-        if not use_topology:
-            topo_token = torch.zeros_like(topo_token)
-            topo_features_surrogate = torch.zeros_like(topo_features_surrogate)
 
         current_token = self.current_proj(structured_state).unsqueeze(1)
-        transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token], dim=1)
+        transformer_tokens = torch.cat([current_token, anchor_tokens], dim=1)
         key_padding_mask = self._build_padding_mask(y_star)
-        encoded = self.task_transformer(transformer_tokens, key_padding_mask=key_padding_mask)
+
+        # TOPOLOGICAL ATTENTION BIAS — topology is now the attention infrastructure
+        # Instead of telling the Transformer about topology (token injection),
+        # we force it to process information along the topological manifold
+        attn_bias = None
+        if use_topology:
+            with torch.autocast(device_type=dense_lifted.device.type, enabled=False):
+                attn_bias = self.topology_branch.compute_attention_bias(
+                    dense_lifted_spatial, y_star, seq_len=transformer_tokens.shape[1]
+                )
+
+        encoded = self.task_transformer(transformer_tokens, key_padding_mask=key_padding_mask, attn_bias=attn_bias)
         pred_actions = self.action_head(encoded[:, 0, :])
         return TrainForwardOutput(
             pred_actions=pred_actions,
@@ -205,7 +205,7 @@ class SynapseEndToEndModel(nn.Module):
             history_lengths = batch.get("history_length")
         history_mask = batch.get("history_mask")
 
-        # Differentiable spectral topology (same path as forward_train)
+        # Compute spatial point cloud for TAB (same path as forward_train)
         _, event_scores_d = self.event_encoder(structured_history)
         if self.config.bypass_anchor_selection:
             saliency_d = torch.ones_like(event_scores_d)
@@ -221,10 +221,6 @@ class SynapseEndToEndModel(nn.Module):
         soft_vectors_spatial = soft_vectors.clone()
         soft_vectors_spatial[:, :, 0] = 0.0
         _, dense_lifted_spatial = self.normalized_lift(soft_vectors_spatial)
-
-        with torch.autocast(device_type=structured_history.device.type, enabled=False):
-            spectral_topo = self.topology_branch.spectral_features(dense_lifted_spatial, y_star_d)
-        topo_token = self.memory_readout.topology_proj(spectral_topo).unsqueeze(1)
 
         # Per-sample exact TDA (for diagnostic dumps only — NOT fed to Transformer)
         exact_states = []
@@ -261,7 +257,6 @@ class SynapseEndToEndModel(nn.Module):
                 pos.append(int(idx) + 1)
             for _ in range(deploy_act_size - len(exact_state.anchor_indices[:num_valid])):
                 pos.append(0)
-            pos.append(actual_length + 1)  # spectral topo position
             pos_indices_list.append(pos)
             
             if self.config.bypass_anchor_selection:
@@ -288,14 +283,21 @@ class SynapseEndToEndModel(nn.Module):
         
         if not use_anchors:
             anchor_tokens = torch.zeros_like(anchor_tokens)
-        if not use_topology:
-            topo_token = torch.zeros_like(topo_token)
 
         current_token = self.current_proj(structured_state).unsqueeze(1)
-        transformer_tokens = torch.cat([current_token, anchor_tokens, topo_token], dim=1)
+        transformer_tokens = torch.cat([current_token, anchor_tokens], dim=1)
         
         key_padding_mask = self._build_padding_mask(deploy_activations)
-        encoded = self.task_transformer(transformer_tokens, key_padding_mask=key_padding_mask, pos_indices=pos_indices_tensor)
+
+        # TAB for deployment
+        attn_bias = None
+        if use_topology:
+            with torch.autocast(device_type=structured_history.device.type, enabled=False):
+                attn_bias = self.topology_branch.compute_attention_bias(
+                    dense_lifted_spatial, y_star_d, seq_len=transformer_tokens.shape[1]
+                )
+
+        encoded = self.task_transformer(transformer_tokens, key_padding_mask=key_padding_mask, pos_indices=pos_indices_tensor, attn_bias=attn_bias)
         
         pred_actions = self.action_head(encoded[:, 0, :])
         return DeployForwardOutput(
