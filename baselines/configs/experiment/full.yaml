@@ -1,9 +1,9 @@
 # SYNAPSE Phase 4 — Full Cross-Domain Baselines Experiment
 # =========================================================
-# 3 public HuggingFace datasets × 5 conditions × 5 seeds (primary) / 3 seeds (ablation)
+# 3 public HuggingFace datasets + 1 LMDB dataset × 5 conditions × 5 seeds (primary) / 3 seeds (ablation)
 #
-# ALL datasets are publicly available and reproducible.
-# No custom/synthetic data in the baselines — those go in the deployment section.
+# D1–D3: Public HuggingFace benchmarks (LeRobot/Parquet)
+# D4: Pick-and-Place structured manipulation (LMDB, end-to-end pipeline format)
 
 condition: B_synapse
 synapse_implementation: end_to_end
@@ -11,8 +11,9 @@ seed: 42
 experiment_name: phase4_cross_domain
 
 synapse:
-  K: 10
-  r: 3
+  keep_all_anchors: true
+  K: 64
+  r: 0
   tau: 0.5
   weights: [1.0, 1.0, 1.0, 1.0]
   Q: 1
@@ -66,7 +67,7 @@ stats:
   rollout_steps: 10
 
 # ═══════════════════════════════════════════════════════════
-# DATASETS: Public HuggingFace benchmarks ONLY
+# DATASETS: Public HuggingFace benchmarks + LMDB structured data
 # ═══════════════════════════════════════════════════════════
 datasets:
   # D1: PushT — Canonical Diffusion Policy benchmark
@@ -96,16 +97,34 @@ datasets:
     batch_size_override: 64
 
   # D3: xArm Lift — Single-arm object lifting benchmark
-  # Medium difficulty lifting task, ~100 episodes, state=4, action=4
+  # Medium difficulty lifting task, ~100 episodes, state=4, action=3
   # Citation: Hansen et al., TDMPC 2022
   - name: xarm_lift
     source: lerobot
     dataset_root: data/datasets
     proprio_dim: 4
-    action_dim: 4
+    action_dim: 3
     max_episode_length: 250
     num_phases: 3
     fps: 15
     batch_size_override: 128
+
+  # D4: Pick-and-Place — Structured manipulation (end-to-end LMDB)
+  # 500 train + 50 val episodes, proprio=22, action=8, 5 phases
+  # Rich structured state: ee_pose(7) + ee_vel(6) + object_pos(3) + grasp(1)
+  - name: pick_place
+    source: lmdb
+    train_path: datasets/data/train/expert_expert_pick_place_500_episodes/expert_expert_pick_place_500_episodes.lmdb
+    val_path: datasets/data/val/expert_expert_pick_place_val_50_episodes/expert_expert_pick_place_val_50_episodes.lmdb
+    proprio_dim: 22
+    action_dim: 8
+    num_phases: 5
+    max_episode_length: 300
+    ee_pose_dim: 7
+    ee_vel_dim: 6
+    object_pos_dim: 3
+    grasp_dim: 1
+    use_rich_structured_state: true
+    batch_size_override: 64
 
 output_dir: output

@@ -92,6 +92,7 @@ class SynapseParams:
     Q: int = 1
     alpha: float = 0.0
     max_edge_length: Optional[float] = None
+    keep_all_anchors: bool = False
 
 
 @dataclass(frozen=True)
@@ -271,9 +272,11 @@ class ExperimentConfig:
     def anchor_feature_dim(self) -> int:
         """Dimensionality of each lifted anchor point.
 
-        proprio_dim + 3 (t, delta, xi from the geometric lift ρ).
+        state_dim + 3 (t, delta, xi from the geometric lift ρ).
+        When use_rich_structured_state=True, state_dim is the full structured
+        state dimension (e.g., 39); otherwise it's proprio_dim.
         """
-        return self.data.proprio_dim + 3
+        return self.structured_state_dim + 3
 
     @property
     def structured_state_dim(self) -> int:

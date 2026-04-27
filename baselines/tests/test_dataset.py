@@ -246,3 +246,53 @@ class TestDataLoaderIntegration:
         )
         batch = next(iter(train_loader))
         assert batch["proprio"].shape[0] <= 4
+
+    def test_rich_structured_state_uses_separate_proprio_stats(self):
+        """Regression test: when use_rich_structured_state=True, proprio (22)
+        and structured_state (39) have different dims and need separate stats."""
+        episodes = _make_test_episodes(num_episodes=3, T=30, proprio_dim=22, action_dim=8)
+        for ep in episodes:
+            ep.ee_pose_history = np.random.randn(30, 7).astype(np.float32)
+            ep.ee_vel_history = np.random.randn(30, 6).astype(np.float32)
+            ep.object_pos_history = np.random.randn(30, 3).astype(np.float32)
+            ep.is_grasped_history = np.random.randn(30, 1).astype(np.float32)
+
+        config = ExperimentConfig(
+            condition=Condition.B_SYNAPSE,
+            synapse_implementation="end_to_end",
+            seed=42,
+            synapse=SynapseParams(K=5, r=2, tau=0.3, Q=1),
+            transformer=TransformerParams(d_model=64, num_heads=4, num_layers=2),
+            data=DataParams(
+                proprio_dim=22,
+                action_dim=8,
+                action_chunk_size=4,
+                history_window=10,
+                use_rich_structured_state=True,
+                ee_pose_dim=7,
+                ee_vel_dim=6,
+                object_pos_dim=3,
+                grasp_dim=1,
+            ),
+            training=TrainingParams(batch_size=4, num_workers=0),
+        )
+
+        # structured_norm_stats is 39-dim, proprio_norm_stats is 22-dim
+        structured_arrays = [ep.structured_history for ep in episodes]
+        structured_norm_stats = compute_normalization_stats(structured_arrays)
+        proprio_arrays = [ep.proprio_history for ep in episodes]
+        proprio_norm_stats = compute_normalization_stats(proprio_arrays)
+
+        assert structured_norm_stats.dim == 39
+        assert proprio_norm_stats.dim == 22
+
+        train_eps, val_eps, test_eps = split_episodes(episodes, seed=42)
+        train_loader, _, _ = create_dataloaders(
+            train_eps, val_eps, test_eps, config,
+            structured_norm_stats,
+            proprio_norm_stats=proprio_norm_stats,
+        )
+        batch = next(iter(train_loader))
+        # proprio is 22-dim, structured_state is 39-dim — no dim mismatch
+        assert batch["proprio"].shape[-1] == 22
+        assert batch["structured_state"].shape[-1] == 39

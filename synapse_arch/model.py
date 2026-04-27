@@ -39,6 +39,7 @@ class SynapseArchitectureConfig:
     Q: int
     k: int
     max_history_tokens: int
+    keep_all_anchors: bool = False
 
 
 class SynapseEndToEndModel(nn.Module):
@@ -108,6 +109,11 @@ class SynapseEndToEndModel(nn.Module):
         saliency_scores = self.saliency_normalizer(event_scores, history_mask)
         saliency_scores = self._mask_saliency(saliency_scores, batch)
         y_star = self.relaxed_selector(saliency_scores)
+        if self.config.keep_all_anchors:
+            # Force all valid timesteps to be active anchors
+            y_star = torch.ones_like(y_star)
+            if history_mask is not None:
+                y_star = y_star * history_mask.to(dtype=y_star.dtype)
         soft_vectors = self._soft_anchor_vectors(structured_history, saliency_scores)
         _, dense_lifted = self.normalized_lift(soft_vectors)
         topo_features = self.topology_branch.surrogate(dense_lifted, y_star)
@@ -188,9 +194,17 @@ class SynapseEndToEndModel(nn.Module):
             exact_state = self._deploy_single(trimmed_sequence)
             exact_states.append(exact_state)
             cloud = exact_state.point_cloud.astype(np.float32)
-            num_valid = min(cloud.shape[0], self.config.K)
+            if self.config.keep_all_anchors:
+                # Override exact state to use all points as anchors
+                exact_state.y_star = np.ones_like(exact_state.y_star)
+                exact_state.anchor_indices = list(range(len(exact_state.y_star)))
+                num_valid = len(exact_state.y_star)
+                deploy_act_size = self.config.max_history_tokens
+            else:
+                num_valid = min(cloud.shape[0], self.config.K)
+                deploy_act_size = self.config.K
             
-            deploy_act = np.zeros(self.config.K, dtype=np.float32)
+            deploy_act = np.zeros(deploy_act_size, dtype=np.float32)
             deploy_act[:num_valid] = 1.0
             deploy_activations_list.append(torch.from_numpy(deploy_act).to(structured_history.device))
             
@@ -202,11 +216,20 @@ class SynapseEndToEndModel(nn.Module):
             pos.append(actual_length + 1)
             pos_indices_list.append(pos)
             
-            if cloud.shape[0] < self.config.K:
-                pad = np.zeros((self.config.K - cloud.shape[0], self.config.k), dtype=np.float32)
-                cloud = np.concatenate([cloud, pad], axis=0)
+            if self.config.keep_all_anchors:
+                # In dense mode, we use the full history sequence (up to max_tokens)
+                if cloud.shape[0] < self.config.max_history_tokens:
+                    pad = np.zeros((self.config.max_history_tokens - cloud.shape[0], self.config.k), dtype=np.float32)
+                    cloud = np.concatenate([cloud, pad], axis=0)
+                else:
+                    cloud = cloud[: self.config.max_history_tokens]
             else:
-                cloud = cloud[: self.config.K]
+                if cloud.shape[0] < self.config.K:
+                    pad = np.zeros((self.config.K - cloud.shape[0], self.config.k), dtype=np.float32)
+                    cloud = np.concatenate([cloud, pad], axis=0)
+                else:
+                    cloud = cloud[: self.config.K]
+            
             anchor_clouds.append(torch.from_numpy(cloud).to(structured_history.device, dtype=structured_history.dtype))
             topo_features.append(torch.from_numpy(exact_state.topology_summary).to(structured_history.device, dtype=structured_history.dtype))
             

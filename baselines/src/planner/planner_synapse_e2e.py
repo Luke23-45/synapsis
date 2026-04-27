@@ -34,6 +34,7 @@ class PlannerSynapseEndToEnd(nn.Module):
             Q=config.synapse.Q,
             k=config.synapse.k,
             max_history_tokens=config.data.max_episode_length,
+            keep_all_anchors=config.synapse.keep_all_anchors,
         )
         self.architecture = SynapseEndToEndModel(arch_config)
 

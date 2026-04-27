@@ -1,0 +1,76 @@
+# SYNAPSE Phase 4 — Pick-and-Place LMDB Smoke Test
+# Quick validation with the structured manipulation dataset
+# Uses the same LMDB data as the end-to-end pipeline
+
+condition: B_synapse
+synapse_implementation: end_to_end
+seed: 42
+experiment_name: pick_place_smoke
+
+synapse:
+  K: 5
+  r: 2
+  tau: 0.5
+  weights: [1.0, 1.0, 1.0, 1.0]
+  Q: 1
+
+transformer:
+  d_model: 128
+  num_heads: 4
+  num_layers: 2
+  ffn_ratio: 4
+  dropout: 0.1
+  activation: gelu
+
+training:
+  max_epochs: 5
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.01
+  warmup_steps: 50
+  early_stopping_patience: 3
+  gradient_clip_norm: 1.0
+  use_amp: false
+  num_workers: 0
+  sparsity_weight: 0.1
+  topology_reg_weight: 0.2
+  aux_ramp_start: 0
+  aux_ramp_end: 3
+
+data:
+  proprio_dim: 22
+  action_dim: 8
+  action_chunk_size: 8
+  history_window: 50
+  max_episode_length: 300
+  num_phases: 5
+  ee_pose_dim: 7
+  ee_vel_dim: 6
+  object_pos_dim: 3
+  grasp_dim: 1
+  use_rich_structured_state: true
+
+stats:
+  num_seeds_primary: 1
+  num_seeds_ablation: 1
+  significance_level: 0.05
+  num_bootstrap_samples: 100
+  rollout_steps: 5
+
+datasets:
+  - name: pick_place
+    source: lmdb
+    train_path: datasets/data/train/expert_expert_pick_place_500_episodes/expert_expert_pick_place_500_episodes.lmdb
+    val_path: datasets/data/val/expert_expert_pick_place_val_50_episodes/expert_expert_pick_place_val_50_episodes.lmdb
+    proprio_dim: 22
+    action_dim: 8
+    num_phases: 5
+    max_episode_length: 300
+    ee_pose_dim: 7
+    ee_vel_dim: 6
+    object_pos_dim: 3
+    grasp_dim: 1
+    use_rich_structured_state: true
+    max_episodes: 20
+
+output_dir: output

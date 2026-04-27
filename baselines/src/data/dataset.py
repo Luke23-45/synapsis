@@ -115,11 +115,16 @@ class RoboticsDataset(Dataset):
         config: ExperimentConfig,
         norm_stats: NormalizationStats,
         action_norm_stats: Optional[NormalizationStats] = None,
+        proprio_norm_stats: Optional[NormalizationStats] = None,
         split: str = "train",
     ) -> None:
         self.config = config
         self.norm_stats = norm_stats
         self.action_norm_stats = action_norm_stats
+        # Proprio-specific stats: when use_rich_structured_state=True,
+        # norm_stats covers the full 39-dim structured state but proprio
+        # is only 22-dim. proprio_norm_stats handles that case.
+        self.proprio_norm_stats = proprio_norm_stats or norm_stats
         self.split = split
         self.condition = config.condition
         self._episodes = episodes
@@ -191,8 +196,10 @@ class RoboticsDataset(Dataset):
         # Normalize exactly once at sample time. Episodes stay in raw scale so
         # downstream cache builders and evaluators can apply the same transform
         # consistently without accidental double-normalization.
-        proprio = self.norm_stats.normalize_torch(proprio)
-        proprio_history = self.norm_stats.normalize_torch(proprio_history)
+        # proprio fields may have different dimensionality from structured state
+        # when use_rich_structured_state=True (e.g., 22 vs 39 dims).
+        proprio = self.proprio_norm_stats.normalize_torch(proprio)
+        proprio_history = self.proprio_norm_stats.normalize_torch(proprio_history)
         structured_state = self.norm_stats.normalize_torch(structured_state)
         structured_history = self.norm_stats.normalize_torch(structured_history)
 
@@ -370,6 +377,7 @@ def create_dataloaders(
     config: ExperimentConfig,
     norm_stats: NormalizationStats,
     action_norm_stats: Optional[NormalizationStats] = None,
+    proprio_norm_stats: Optional[NormalizationStats] = None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """Create train/val/test DataLoaders from episode lists.
 
@@ -377,13 +385,22 @@ def create_dataloaders(
     variable-length histories across all dataset types.
     """
     train_dataset = RoboticsDataset(
-        train_eps, config, norm_stats, action_norm_stats=action_norm_stats, split="train"
+        train_eps, config, norm_stats,
+        action_norm_stats=action_norm_stats,
+        proprio_norm_stats=proprio_norm_stats,
+        split="train",
     )
     val_dataset = RoboticsDataset(
-        val_eps, config, norm_stats, action_norm_stats=action_norm_stats, split="val"
+        val_eps, config, norm_stats,
+        action_norm_stats=action_norm_stats,
+        proprio_norm_stats=proprio_norm_stats,
+        split="val",
     )
     test_dataset = RoboticsDataset(
-        test_eps, config, norm_stats, action_norm_stats=action_norm_stats, split="test"
+        test_eps, config, norm_stats,
+        action_norm_stats=action_norm_stats,
+        proprio_norm_stats=proprio_norm_stats,
+        split="test",
     )
 
     effective_num_workers = _effective_num_workers(config.training.num_workers)

@@ -256,7 +256,6 @@ def rollout_evaluate(
         open_loop_mse=open_loop_mse,
     )
 
-
 def rollout_evaluate_dataset(
     model: RoboticsPlannerBase,
     dataloader: torch.utils.data.DataLoader,
@@ -283,11 +282,11 @@ def rollout_evaluate_dataset(
     model.eval()
 
     results = {}
-    episode_count = 0
 
     with torch.no_grad():
         for batch in dataloader:
-            if episode_count >= max_episodes:
+            # We track valid unique episodes inside `results` directly
+            if len(results) >= max_episodes:
                 break
 
             batch_device = {
@@ -301,8 +300,21 @@ def rollout_evaluate_dataset(
             # Run rollout for each sample in batch
             B = gt_actions.shape[0]
             for b in range(B):
-                if episode_count >= max_episodes:
+                if len(results) >= max_episodes:
                     break
+                
+                # Check for existing episode id to prevent evaluating/overwriting same-episode samples
+                if "episode_idx" in batch_device:
+                    # Safely handles both scalar items and 1D tensors safely
+                    ep_val = batch_device["episode_idx"][b].item() if batch_device["episode_idx"].dim() > 0 else batch_device["episode_idx"].item()
+                    ep_id = f"episode_{int(ep_val):04d}"
+                else:
+                    # Fallback to counts if the dataset pipeline strips episode context
+                    ep_id = f"sample_{len(results):04d}"
+
+                # CRITICAL FIX: Only evaluate one rollout sequence per unique episode
+                if ep_id in results:
+                    continue
 
                 # Create single-sample batch
                 single_batch = {
@@ -317,12 +329,7 @@ def rollout_evaluate_dataset(
                     n_steps=n_steps,
                 )
 
-                if "episode_idx" in single_batch:
-                    ep_id = f"episode_{int(single_batch['episode_idx'][0].item()):04d}"
-                else:
-                    ep_id = f"episode_{episode_count:04d}"
                 results[ep_id] = result
-                episode_count += 1
 
     log.info(
         "Rollout evaluation: %d episodes, %d steps, condition=%s",

@@ -226,10 +226,22 @@ def _run_dataset_experiment(
         return {}
 
     # 4. Compute normalization from training split
+    # Structured norm stats: full concatenated state (proprio + ee_pose + ee_vel + ...)
     norm_stats = compute_normalization_stats_from_episodes(
         [{"proprio_history": ep.structured_history} for ep in train_eps]
     )
     norm_stats.save(ds_output / "normalization_stats.pt")
+
+    # Proprio-only norm stats: for normalizing the proprio-specific fields
+    # that have different dimensionality from the structured state.
+    if ds_config.data.use_rich_structured_state:
+        proprio_norm_stats = compute_normalization_stats_from_episodes(
+            [{"proprio_history": ep.proprio_history} for ep in train_eps]
+        )
+        proprio_norm_stats.save(ds_output / "proprio_normalization_stats.pt")
+    else:
+        proprio_norm_stats = norm_stats
+
     action_norm_stats = compute_normalization_stats_from_episodes(
         [{"actions": ep.actions} for ep in train_eps],
         proprio_key="actions",
@@ -253,7 +265,9 @@ def _run_dataset_experiment(
             episode_dicts = [
                 {
                     "episode_id": ep.episode_id,
-                    "proprio_history": ep.proprio_history,
+                    "proprio_history": ep.structured_history
+                    if ds_config.data.use_rich_structured_state
+                    else ep.proprio_history,
                 }
                 for ep in split_eps
             ]
@@ -315,6 +329,7 @@ def _run_dataset_experiment(
                 cond_config,
                 norm_stats,
                 action_norm_stats=action_norm_stats,
+                proprio_norm_stats=proprio_norm_stats,
             )
 
             cond_dir = ds_output / f"condition_{cond_name}"
