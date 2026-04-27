@@ -18,6 +18,7 @@ from typing import Dict, Optional
 
 from .adapters.base_adapter import BaseDatasetAdapter
 from .adapters.lerobot_adapter import LeRobotAdapter, LEROBOT_SPECS
+from .adapters.lmdb_adapter import LMDBAdapter, LMDB_SPECS
 
 log = logging.getLogger(__name__)
 
@@ -52,10 +53,20 @@ def create_adapter(
             local_path=local_path,
             max_episodes=max_episodes,
         )
+    if dataset_name in LMDB_SPECS:
+        if local_path is None:
+            raise ValueError(
+                f"LMDB dataset '{dataset_name}' requires local_path to point to a .lmdb file."
+            )
+        return LMDBAdapter(
+            dataset_name=dataset_name,
+            local_path=local_path,
+            max_episodes=max_episodes,
+        )
 
     raise ValueError(
         f"Unknown dataset: '{dataset_name}'. "
-        f"Available: {list(LEROBOT_SPECS.keys())}"
+        f"Available: {list(LEROBOT_SPECS.keys()) + list(LMDB_SPECS.keys())}"
     )
 
 
@@ -76,6 +87,21 @@ def list_available_datasets() -> Dict[str, dict]:
             "action_dim": spec.action_dim,
             "num_phases": spec.num_phases,
             "max_episode_length": spec.max_episode_length,
+        }
+
+    for name, spec in LMDB_SPECS.items():
+        datasets[name] = {
+            "source": "lmdb",
+            "proprio_dim": spec.proprio_dim,
+            "action_dim": spec.action_dim,
+            "num_phases": spec.num_phases,
+            "structured_state_dim": (
+                spec.proprio_dim
+                + spec.ee_pose_dim
+                + spec.ee_vel_dim
+                + spec.object_pos_dim
+                + spec.grasp_dim
+            ),
         }
 
     return datasets

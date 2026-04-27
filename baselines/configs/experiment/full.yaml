@@ -35,7 +35,7 @@ training:
   beta1: 0.9
   beta2: 0.999
   warmup_steps: 500
-  early_stopping_patience: 10
+  early_stopping_patience: 30
   gradient_clip_norm: 1.0
   use_amp: true
   num_workers: 4
@@ -96,13 +96,13 @@ datasets:
     batch_size_override: 64
 
   # D3: xArm Lift — Single-arm object lifting benchmark
-  # Medium difficulty lifting task, ~100 episodes, state=4, action=3
+  # Medium difficulty lifting task, ~100 episodes, state=4, action=4
   # Citation: Hansen et al., TDMPC 2022
   - name: xarm_lift
     source: lerobot
     dataset_root: data/datasets
     proprio_dim: 4
-    action_dim: 3
+    action_dim: 4
     max_episode_length: 250
     num_phases: 3
     fps: 15

@@ -22,6 +22,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.data.adapters.base_adapter import RobotEpisode
 from src.data.adapters.lerobot_adapter import LeRobotAdapter, LEROBOT_SPECS
+from src.data.adapters.lmdb_adapter import LMDBAdapter, LMDB_SPECS
 from src.data.registry import create_adapter, list_available_datasets
 from src.data.dataset import (
     RoboticsDataset,
@@ -155,6 +156,69 @@ class TestLeRobotAdapter:
             LeRobotAdapter("nonexistent")
 
 
+class TestLMDBAdapter:
+    def test_spec_registered(self):
+        spec = LMDB_SPECS["pick_place"]
+        assert spec.proprio_dim == 22
+        assert spec.action_dim == 8
+        assert spec.num_phases == 5
+
+    def test_adapter_construction(self, tmp_path):
+        lmdb_path = tmp_path / "pick_place.lmdb"
+        lmdb_path.write_bytes(b"")
+        (tmp_path / "pick_place_index.json").write_text('{"episodes": []}', encoding="utf-8")
+        adapter = LMDBAdapter("pick_place", local_path=lmdb_path)
+        assert adapter.dataset_name == "pick_place"
+        assert adapter.structured_state_dim == 39
+
+    def test_load_episodes_maps_modalities(self, tmp_path, monkeypatch):
+        lmdb_path = tmp_path / "pick_place.lmdb"
+        lmdb_path.write_bytes(b"")
+        (tmp_path / "pick_place_index.json").write_text('{"episodes": []}', encoding="utf-8")
+
+        class FakeReader:
+            def __init__(self, lmdb_path: str):
+                self.lmdb_path = lmdb_path
+
+            def to_applied_dataset(self, max_episodes: int = 0):
+                episode = {
+                    "episode_id": "ep_0001",
+                    "length": 4,
+                    "states": np.ones((4, 22), dtype=np.float32),
+                    "actions": np.ones((4, 8), dtype=np.float32) * 2.0,
+                    "phase_labels": np.array([0, 1, 2, 3], dtype=np.int64),
+                    "ee_pose": np.ones((4, 7), dtype=np.float32),
+                    "ee_vel": np.ones((4, 6), dtype=np.float32),
+                    "object_pos": np.ones((4, 3), dtype=np.float32),
+                    "is_grasped": np.array([0.0, 1.0, 1.0, 0.0], dtype=np.float32),
+                    "success": True,
+                }
+                return {"episodes": [episode]}
+
+            def close_env(self):
+                return None
+
+        import src.data.adapters.lmdb_adapter as lmdb_adapter_module
+
+        monkeypatch.setattr(
+            lmdb_adapter_module,
+            "StandaloneLMDBReader",
+            FakeReader,
+            raising=False,
+        )
+
+        adapter = LMDBAdapter("pick_place", local_path=lmdb_path)
+        episodes = adapter.load_episodes()
+        assert len(episodes) == 1
+        ep = episodes[0]
+        assert ep.proprio_history.shape == (4, 22)
+        assert ep.actions.shape == (4, 8)
+        assert ep.gt_phase.tolist() == [0, 1, 2, 3]
+        assert ep.structured_history.shape == (4, 39)
+        assert ep.is_grasped_history.shape == (4, 1)
+        assert ep.success is True
+
+
 # ---------------------------------------------------------------------------
 # Registry Tests
 # ---------------------------------------------------------------------------
@@ -167,16 +231,46 @@ class TestRegistry:
         assert "pusht" in available
         assert "aloha_transfer" in available
         assert "xarm_lift" in available
-        assert len(available) == 3
+        assert "pick_place" in available
+        assert len(available) == 4
 
     def test_create_lerobot_adapter(self):
         adapter = create_adapter("pusht")
         assert adapter.dataset_name == "pusht"
         assert adapter.proprio_dim == 2
 
+    def test_create_lmdb_adapter(self, tmp_path):
+        lmdb_path = tmp_path / "pick_place.lmdb"
+        lmdb_path.write_bytes(b"")
+        (tmp_path / "pick_place_index.json").write_text('{"episodes": []}', encoding="utf-8")
+        adapter = create_adapter("pick_place", local_path=lmdb_path)
+        assert adapter.dataset_name == "pick_place"
+        assert adapter.proprio_dim == 22
+
     def test_unknown_dataset_raises(self):
         with pytest.raises(ValueError, match="Unknown dataset"):
             create_adapter("nonexistent_dataset")
+
+
+class TestLMDBDatasetSpecConfig:
+    def test_for_dataset_enables_rich_structured_state(self):
+        config = ExperimentConfig(condition=Condition.B_SYNAPSE)
+        ds = DatasetSpec(
+            name="pick_place",
+            source="lmdb",
+            proprio_dim=22,
+            action_dim=8,
+            max_episode_length=300,
+            num_phases=5,
+            ee_pose_dim=7,
+            ee_vel_dim=6,
+            object_pos_dim=3,
+            grasp_dim=1,
+            use_rich_structured_state=True,
+        )
+        resolved = config.for_dataset(ds)
+        assert resolved.data.use_rich_structured_state is True
+        assert resolved.structured_state_dim == 39
 
 
 # ---------------------------------------------------------------------------

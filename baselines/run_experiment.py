@@ -84,45 +84,58 @@ _BASELINES_ROOT = Path(__file__).resolve().parent
 def _load_dataset_episodes(
     ds_spec: DatasetSpec,
     config: ExperimentConfig,
+    local_path_override: Optional[Path] = None,
 ) -> List[RobotEpisode]:
     """Load episodes from a single dataset using the adapter registry.
-
-    All datasets must be public HuggingFace LeRobot benchmarks.
-    Fails loudly if data is unavailable — no synthetic fallback.
     """
     log.info("Loading dataset: %s (source=%s)", ds_spec.name, ds_spec.source)
-
-    if ds_spec.source != "lerobot":
-        raise ValueError(
-            f"Only 'lerobot' source is supported in baselines. "
-            f"Got: '{ds_spec.source}' for dataset '{ds_spec.name}'"
-        )
 
     if str(_BASELINES_ROOT) not in sys.path:
         sys.path.insert(0, str(_BASELINES_ROOT))
 
-    from download_datasets import (
-        DEFAULT_DATASET_ROOT,
-        ensure_datasets_available,
-        resolve_dataset_file,
-    )
-
-    dataset_root = Path(ds_spec.dataset_root) if ds_spec.dataset_root else DEFAULT_DATASET_ROOT
-    if not dataset_root.is_absolute():
-        dataset_root = (_BASELINES_ROOT / dataset_root).resolve()
-
-    local_path = resolve_dataset_file(ds_spec.name, dataset_root=dataset_root, explicit_path=ds_spec.local_path)
-    if not local_path.is_absolute():
-        local_path = (_BASELINES_ROOT / local_path).resolve()
-
-    if not local_path.exists():
-        log.info(
-            "Dataset '%s' is missing locally. Verifying/downloading into %s.",
-            ds_spec.name,
-            dataset_root,
+    if ds_spec.source == "lerobot":
+        from download_datasets import (
+            DEFAULT_DATASET_ROOT,
+            ensure_datasets_available,
+            resolve_dataset_file,
         )
-        ensure_datasets_available([ds_spec.name], output_dir=dataset_root)
-        local_path = resolve_dataset_file(ds_spec.name, dataset_root=dataset_root)
+
+        dataset_root = Path(ds_spec.dataset_root) if ds_spec.dataset_root else DEFAULT_DATASET_ROOT
+        if not dataset_root.is_absolute():
+            dataset_root = (_BASELINES_ROOT / dataset_root).resolve()
+
+        local_path = resolve_dataset_file(
+            ds_spec.name,
+            dataset_root=dataset_root,
+            explicit_path=ds_spec.local_path,
+        )
+        if not local_path.is_absolute():
+            local_path = (_BASELINES_ROOT / local_path).resolve()
+
+        if not local_path.exists():
+            log.info(
+                "Dataset '%s' is missing locally. Verifying/downloading into %s.",
+                ds_spec.name,
+                dataset_root,
+            )
+            ensure_datasets_available([ds_spec.name], output_dir=dataset_root)
+            local_path = resolve_dataset_file(ds_spec.name, dataset_root=dataset_root)
+    elif ds_spec.source == "lmdb":
+        path = local_path_override or ds_spec.local_path
+        if path is None:
+            raise ValueError(
+                f"LMDB dataset '{ds_spec.name}' requires local_path or a split-specific path."
+            )
+        local_path = Path(path)
+        if not local_path.is_absolute():
+            local_path = (_PROJECT_ROOT / local_path).resolve()
+        if not local_path.exists():
+            raise FileNotFoundError(f"LMDB dataset path not found: {local_path}")
+    else:
+        raise ValueError(
+            f"Unsupported dataset source '{ds_spec.source}' for '{ds_spec.name}'."
+        )
+
     adapter = create_adapter(
         ds_spec.name,
         local_path=local_path,
@@ -138,6 +151,45 @@ def _load_dataset_episodes(
         adapter.action_dim,
     )
     return episodes
+
+
+def _load_dataset_splits(
+    ds_spec: DatasetSpec,
+    ds_config: ExperimentConfig,
+) -> Tuple[List[RobotEpisode], List[RobotEpisode], List[RobotEpisode]]:
+    """Load dataset splits, preserving explicit LMDB split files when provided."""
+    if ds_spec.source == "lmdb" and ds_spec.train_path and ds_spec.val_path:
+        train_eps = _load_dataset_episodes(
+            ds_spec,
+            ds_config,
+            local_path_override=Path(ds_spec.train_path),
+        )
+        val_eps = _load_dataset_episodes(
+            ds_spec,
+            ds_config,
+            local_path_override=Path(ds_spec.val_path),
+        )
+        if ds_spec.test_path:
+            test_eps = _load_dataset_episodes(
+                ds_spec,
+                ds_config,
+                local_path_override=Path(ds_spec.test_path),
+            )
+        else:
+            log.info(
+                "No explicit LMDB test split provided for %s; reusing validation episodes for test evaluation.",
+                ds_spec.name,
+            )
+            test_eps = list(val_eps)
+        return train_eps, val_eps, test_eps
+
+    episodes = _load_dataset_episodes(ds_spec, ds_config)
+    return split_episodes(
+        episodes,
+        train_ratio=ds_config.data.train_ratio,
+        val_ratio=ds_config.data.val_ratio,
+        seed=ds_config.seed,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -167,19 +219,11 @@ def _run_dataset_experiment(
     # 1. Create dataset-specific config with correct dimensions
     ds_config = config.for_dataset(ds_spec)
 
-    # 2. Load episodes
-    episodes = _load_dataset_episodes(ds_spec, config)
-    if not episodes:
-        log.error("No episodes loaded for '%s' — skipping.", ds_name)
+    # 2. Load episodes / splits
+    train_eps, val_eps, test_eps = _load_dataset_splits(ds_spec, ds_config)
+    if not train_eps or not val_eps:
+        log.error("Insufficient episodes loaded for '%s' — skipping.", ds_name)
         return {}
-
-    # 3. Split
-    train_eps, val_eps, test_eps = split_episodes(
-        episodes,
-        train_ratio=ds_config.data.train_ratio,
-        val_ratio=ds_config.data.val_ratio,
-        seed=ds_config.seed,
-    )
 
     # 4. Compute normalization from training split
     norm_stats = compute_normalization_stats_from_episodes(

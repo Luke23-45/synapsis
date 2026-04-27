@@ -152,14 +152,22 @@ class DatasetSpec:
     """
 
     name: str = "pusht"
-    source: str = "lerobot"                  # "lerobot" (HuggingFace)
+    source: str = "lerobot"                  # "lerobot" or "lmdb"
     dataset_root: Optional[str] = None      # Root directory for canonical on-disk dataset layout
     local_path: Optional[str] = None        # Path to local Parquet file
+    train_path: Optional[str] = None        # Optional explicit training split path
+    val_path: Optional[str] = None          # Optional explicit validation split path
+    test_path: Optional[str] = None         # Optional explicit test split path
     proprio_dim: int = 2
     action_dim: int = 2
     max_episode_length: int = 300
     num_phases: int = 3
     fps: int = 10
+    ee_pose_dim: int = 0
+    ee_vel_dim: int = 0
+    object_pos_dim: int = 0
+    grasp_dim: int = 0
+    use_rich_structured_state: bool = False
     batch_size_override: Optional[int] = None  # Override global batch_size
     max_episodes: Optional[int] = None         # Limit episodes (for testing)
 
@@ -184,6 +192,7 @@ class DataParams:
     train_ratio: float = 0.8
     val_ratio: float = 0.1
     test_ratio: float = 0.1
+    use_rich_structured_state: bool = False
 
 
 @dataclass(frozen=True)
@@ -269,11 +278,16 @@ class ExperimentConfig:
     @property
     def structured_state_dim(self) -> int:
         """Total dimensionality of the state vector.
-        
-        In Phase 4 baselines using LeRobot, the entire state is represented
-        by proprio_dim, unlike the Phase 3 E2E custom LMDB format.
         """
-        return self.data.proprio_dim
+        if not self.data.use_rich_structured_state:
+            return self.data.proprio_dim
+        return (
+            self.data.proprio_dim
+            + self.data.ee_pose_dim
+            + self.data.ee_vel_dim
+            + self.data.object_pos_dim
+            + self.data.grasp_dim
+        )
 
     def for_dataset(self, dataset_spec: DatasetSpec) -> "ExperimentConfig":
         """Create a dataset-specific config by overriding dimensions.
@@ -291,11 +305,11 @@ class ExperimentConfig:
             train_ratio=self.data.train_ratio,
             val_ratio=self.data.val_ratio,
             test_ratio=self.data.test_ratio,
-            ee_pose_dim=self.data.ee_pose_dim,
-            ee_vel_dim=self.data.ee_vel_dim,
-            object_pos_dim=self.data.object_pos_dim,
-            grasp_dim=self.data.grasp_dim,
-
+            ee_pose_dim=dataset_spec.ee_pose_dim,
+            ee_vel_dim=dataset_spec.ee_vel_dim,
+            object_pos_dim=dataset_spec.object_pos_dim,
+            grasp_dim=dataset_spec.grasp_dim,
+            use_rich_structured_state=dataset_spec.use_rich_structured_state,
         )
 
         overridden_training = self.training
